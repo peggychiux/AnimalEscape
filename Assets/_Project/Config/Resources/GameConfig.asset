@@ -1,0 +1,89 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 326b8b406ce544d47892615ca498353c, type: 3}
+  m_Name: GameConfig
+  m_EditorClassIdentifier: Assembly-CSharp::AnimalEscape.Core.GameConfig
+  maxPlayers: 5
+  localPort: 7777
+  human:
+    displayName: "\u4EBA\u985E"
+    height: 1.8
+    radius: 0.35
+    moveSpeed: 5
+    jumpHeight: 1
+    cameraDistance: 5
+    color: {r: 0.95, g: 0.55, b: 0.15, a: 1}
+  rabbit:
+    displayName: "\u5154\u5B50"
+    height: 0.6
+    radius: 0.25
+    moveSpeed: 6.5
+    jumpHeight: 1.6
+    cameraDistance: 4
+    color: {r: 0.95, g: 0.95, b: 0.92, a: 1}
+  monkey:
+    displayName: "\u7334\u5B50"
+    height: 0.9
+    radius: 0.28
+    moveSpeed: 5.5
+    jumpHeight: 1.3
+    cameraDistance: 4
+    color: {r: 0.55, g: 0.36, b: 0.2, a: 1}
+  raccoon:
+    displayName: "\u6D63\u718A"
+    height: 0.7
+    radius: 0.27
+    moveSpeed: 5
+    jumpHeight: 1
+    cameraDistance: 4
+    color: {r: 0.52, g: 0.54, b: 0.58, a: 1}
+  turtle:
+    displayName: "\u70CF\u9F9C"
+    height: 0.5
+    radius: 0.25
+    moveSpeed: 3.5
+    jumpHeight: 0.5
+    cameraDistance: 4
+    color: {r: 0.3, g: 0.62, b: 0.32, a: 1}
+  turnSpeed: 720
+  gravity: -20
+  sneakSpeedMultiplier: 0.5
+  humanViewMode: 0
+  animalViewMode: 1
+  mouseSensitivity: 0.12
+  gamepadLookSpeed: 150
+  firstPersonFieldOfView: 70
+  firstPersonMinPitch: -80
+  firstPersonMaxPitch: 80
+  thirdPersonFieldOfView: 60
+  minPitch: -20
+  maxPitch: 65
+  netRange: 2.6
+  netHalfAngle: 50
+  netWindup: 0.2
+  netCooldown: 1.5
+  netMaxHeightDifference: 1.8
+  netOriginHeight: 1.1
+  struggleGainNetted: 0.06
+  struggleGainCarried: 0.035
+  struggleDecayPerSecond: 0.05
+  struggleMinPressInterval: 0.05
+  breakFreeProtectionSeconds: 3
+  pickupRange: 2
+  carrySpeedMultiplier: 0.7
+  bumpMinSpeed: 3.3
+  bumpCooldown: 1
+  staggerSecondsOnBump: 2
+  staggerSecondsOnEscape: 1.2
+  staggerSpeedMultiplier: 0.3
+  nameTagMaxDistance: 25
+  virtualPlayersAutoJoinLocal: 1
