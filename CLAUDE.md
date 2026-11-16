@@ -68,6 +68,20 @@
 - Input System 1.20.1，Cinemachine 3.1.7，Multiplayer Play Mode 2.0.2
 - Active Input Handling = Both（原型介面用 IMGUI，執行時需要舊輸入後端才收得到事件）
 
+## 版本控制
+
+- GitHub（私人）：`peggychiux/AnimalEscape`，分支 `main`。2026-11-16 建立，第一版包含 M0–M2。
+- **使用者說要存檔或推上去時才 commit／push**，不要自己決定。一個里程碑一版，訊息用中文（例：`M3：捕捉籠與救援`）。
+- 作者資訊已經設在這個儲存庫的 git 設定裡（GitHub 帳號名稱＋GitHub 的隱藏信箱）。**不要改成使用者的真實信箱**，
+  也不要把真實信箱寫進任何會進版本控制的檔案。
+- 從雲端工作階段推上去的做法（Mac 上的資料夾沒有 GitHub 登入資訊，雲端這邊才有）：
+  1. 在使用者的資料夾裡 `git add -A`、`git commit`（git 會刪自己的鎖定檔，所以要先用 device_request_delete_permission 取得刪除權限）。
+  2. `git bundle create Logs/x.bundle origin/main..main`（第一次用 `main`），把這個檔搬到雲端。
+  3. 雲端用 add_repo（push）接上 repo、clone 下來，`git pull <bundle> main`、`git push origin main`。
+  4. 回到使用者的資料夾：`git update-ref refs/remotes/origin/main <新的 commit>`，刪掉 bundle。
+  這樣兩邊是同一個 commit，使用者之後自己 `git status` 也會顯示和 GitHub 同步。
+- 這個工作階段不能新建 GitHub repo（API 被限制在已接上的 repo）；需要新 repo 時請使用者建，或在他登入後用瀏覽器幫他建。
+
 ## 架構規則
 
 1. **主機說了算**：捕捉、扛起、關籠、救援、計時器、混亂值、勝負全部由主機判定，玩家端只送出操作（RPC）。

@@ -154,14 +154,23 @@ Tools/           record_demo.py：錄示範影片用的劇本（座標還是舊�
 
 ## 版本控制
 
-專案已附 `.gitignore` 和 `.gitattributes`（含 Git LFS 規則），但還沒有建立 Git 儲存庫。在這個資料夾執行：
+專案放在 GitHub（私人）：<https://github.com/peggychiux/AnimalEscape>，分支是 `main`。
+`.gitignore` 已經排除 Unity 自動產生的資料夾（Library、Logs、UserSettings 等），所以儲存庫很小。
+
+每做完一個里程碑存一版：
 
 ```
-git lfs install
-git init
-git add .
-git commit -m "M1: 身分、移動、灰盒地圖"
+git add -A
+git commit -m "M3: 捕捉籠與救援"
+git push
 ```
+
+- 在這台 Mac 上第一次 `git push` 時會要你登入 GitHub；用 GitHub Desktop 開這個資料夾，或照終端機的提示用瀏覽器登入都可以。
+- **另一台電腦（包含 Windows）要拿專案**：先在 GitHub 把對方加成這個 repo 的協作者，對方執行
+  `git clone https://github.com/peggychiux/AnimalEscape.git`，再用 Unity Hub 開啟（Unity 6000.3.25f1）。
+  第一次開會花幾分鐘重建 Library。
+- `.gitattributes` 裡有 Git LFS 的規則（圖片、模型、音效）。目前專案沒有這類檔案，所以還用不到；
+  之後加入美術素材之前，每台電腦先執行一次 `git lfs install`。
 
 ## 出問題時
 
