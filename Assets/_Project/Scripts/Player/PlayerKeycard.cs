@@ -122,7 +122,8 @@ namespace AnimalEscape.Players
             m_Capture = GetComponent<PlayerCapture>();
             m_Rescue = GetComponent<PlayerRescue>();
 
-            if (IsOwner)
+            // 電腦玩家的角色在主機上也是 IsOwner，但它不讀鍵盤、也不是「這台電腦的玩家」。
+            if (IsOwner && !PlayerAvatar.IsBotObject(this))
             {
                 Local = this;
                 m_HoldAction = new InputAction("Swipe Keycard", InputActionType.Button);

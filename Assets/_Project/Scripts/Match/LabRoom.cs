@@ -403,7 +403,7 @@ namespace AnimalEscape.Match
         /// <summary>還在場上（不在實驗室）的動物，照玩家編號排；自己不算。</summary>
         static bool IsWatchable(PlayerAvatar avatar)
         {
-            return avatar != null && avatar.IsSpawned && !avatar.IsOwner && Roles.IsAnimal(avatar.AvatarRole.Value)
+            return avatar != null && avatar.IsSpawned && !avatar.IsMine && Roles.IsAnimal(avatar.AvatarRole.Value)
                 && avatar.Capture != null && !avatar.Capture.IsInLab;
         }
 

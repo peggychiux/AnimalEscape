@@ -22,7 +22,68 @@ namespace AnimalEscape.Players
         /// <summary>主機在產生角色前先填好，產生時會寫進 AvatarRole 同步給所有人。</summary>
         [System.NonSerialized] public Role PendingRole = Role.None;
 
+        /// <summary>主機在產生角色前先填好：這是不是電腦玩家的角色。</summary>
+        [System.NonSerialized] public bool PendingIsBot;
+
+        /// <summary>主機在產生角色前先填好：這個角色屬於哪一個玩家狀態（PlayerSlot 的 NetworkObjectId）。</summary>
+        [System.NonSerialized] public ulong PendingSlotId;
+
+        // 注意宣告順序：BotFlag、SlotId 要比 AvatarRole 早到。
+
+        /// <summary>這是電腦玩家的角色（由主機上的 AnimalBot 操作，擁有者是主機）。</summary>
+        public readonly NetworkVariable<bool> BotFlag = new NetworkVariable<bool>(false);
+
+        /// <summary>
+        /// 這個角色屬於哪一個玩家狀態（PlayerSlot 的 NetworkObjectId）。
+        /// 不能用「擁有者的連線編號」去找：電腦玩家的角色擁有者是主機，和主機自己的編號一樣。
+        /// </summary>
+        public readonly NetworkVariable<ulong> SlotId = new NetworkVariable<ulong>(0);
+
         public readonly NetworkVariable<Role> AvatarRole = new NetworkVariable<Role>(Role.None);
+
+        /// <summary>這是不是電腦玩家的角色（主機在產生前就知道，其他電腦等同步）。</summary>
+        public bool IsBot
+        {
+            get { return BotFlag.Value || (IsServer && PendingIsBot); }
+        }
+
+        /// <summary>
+        /// 這是不是「這台電腦的玩家自己操作的角色」：擁有者、而且不是電腦玩家。
+        /// 讀鍵盤、跟鏡頭、各種 Local 都要用這個判斷，不能只看 IsOwner——電腦玩家的角色在主機上也是 IsOwner。
+        /// </summary>
+        public bool IsMine
+        {
+            get { return IsOwner && !IsBot; }
+        }
+
+        /// <summary>這個物件身上的角色是不是電腦玩家（給同一個物件上的其他元件用）。</summary>
+        public static bool IsBotObject(Component component)
+        {
+            var avatar = component != null ? component.GetComponent<PlayerAvatar>() : null;
+            return avatar != null && avatar.IsBot;
+        }
+
+        /// <summary>這個角色所屬的玩家狀態；找不到時是 null。</summary>
+        public PlayerSlot Slot
+        {
+            get
+            {
+                ulong id = SlotId.Value != 0 ? SlotId.Value : (IsServer ? PendingSlotId : 0);
+                if (id != 0)
+                {
+                    for (int i = 0; i < PlayerSlot.All.Count; i++)
+                    {
+                        PlayerSlot slot = PlayerSlot.All[i];
+                        if (slot != null && slot.IsSpawned && slot.NetworkObjectId == id)
+                        {
+                            return slot;
+                        }
+                    }
+                }
+
+                return IsBot ? null : PlayerSlot.FindByClient(OwnerClientId);
+            }
+        }
 
         /// <summary>同一個角色身上的捕捉狀態（被網住、被扛著、正扛著誰…）。</summary>
         public PlayerCapture Capture { get; private set; }
@@ -57,7 +118,7 @@ namespace AnimalEscape.Players
         {
             get
             {
-                PlayerSlot slot = PlayerSlot.FindByClient(OwnerClientId);
+                PlayerSlot slot = Slot;
                 return slot != null ? slot.PlayerNumber : (int)OwnerClientId + 1;
             }
         }
@@ -79,9 +140,28 @@ namespace AnimalEscape.Players
                 gameObject.AddComponent<PlayerSounds>();
             }
 
-            if (IsServer && PendingRole != Role.None)
+            if (IsServer)
             {
-                AvatarRole.Value = PendingRole;
+                if (PendingIsBot)
+                {
+                    BotFlag.Value = true;
+                }
+
+                if (PendingSlotId != 0)
+                {
+                    SlotId.Value = PendingSlotId;
+                }
+
+                if (PendingRole != Role.None)
+                {
+                    AvatarRole.Value = PendingRole;
+                }
+
+                // 電腦玩家的大腦只在主機上（不連線，生成時才加上）。
+                if (PendingIsBot && GetComponent<AnimalBot>() == null)
+                {
+                    gameObject.AddComponent<AnimalBot>();
+                }
             }
 
             AvatarRole.OnValueChanged += OnRoleChanged;

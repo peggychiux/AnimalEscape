@@ -37,6 +37,10 @@ namespace AnimalEscape.EditorTools
     ///                           加 jump 表示起步時跳一下，加 sneak 表示慢走，
     ///                           加 thru 表示只是路過這一點（不減速，接著做下一個 walk，路線才順）
     ///     jump                  原地跳一下
+    ///     bot add [身分]         （主機）加一隻電腦動物；不給身分就挑第一個還沒人用的動物
+    ///     bot remove [all]      （主機）移除最後加的那一隻電腦動物；all 全部移除
+    ///     bot list              （主機）每一隻電腦動物在做什麼、目標、狀態、位置，和找路資料建好了沒
+    ///     bot freeze on|off     （主機）測試用：電腦動物全部站住（被網住照樣會掙脫），好讓人類走過去網牠
     ///     turn left|right|none [秒數] [前後]
     ///                           模擬按住 ←→ 方向鍵幾秒（預設 1 秒）；前後是 −1～1，模擬同時按住 ↓／↑。
     ///                           回報鏡頭和身體轉了幾度、走了多遠。GameConfig.arrowKeyTurning 關掉時 ←→ 是橫著走
@@ -421,6 +425,10 @@ namespace AnimalEscape.EditorTools
 
                 case "turn":
                     StartTurn(label, args);
+                    break;
+
+                case "bot":
+                    RunBot(label, args);
                     break;
 
                 case "teleport":
@@ -919,6 +927,86 @@ namespace AnimalEscape.EditorTools
 
                 return false;
             };
+        }
+
+        /// <summary>（主機）電腦動物：加、移除、列出在做什麼。</summary>
+        static void RunBot(string label, string[] args)
+        {
+            PlayerSpawner spawner = PlayerSpawner.Instance;
+            string action = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
+            if (spawner == null)
+            {
+                Report(label, "失敗：沒有 PlayerSpawner");
+                return;
+            }
+
+            if (action == "add")
+            {
+                Role role = Role.None;
+                if (args.Length > 1 && !System.Enum.TryParse(args[1], true, out role))
+                {
+                    Report(label, "失敗：不認得的身分 " + args[1]);
+                    return;
+                }
+
+                string reason;
+                PlayerSlot slot = spawner.AddBot(role, out reason);
+                Report(label, slot != null ? "加了 P" + slot.PlayerNumber + " " + slot.CurrentRole.Value + "（電腦）" : "加不了：" + reason);
+                return;
+            }
+
+            if (action == "freeze")
+            {
+                AnimalBot.FreezeForTesting = !(args.Length > 1 && args[1].ToLowerInvariant() == "off");
+                Report(label, "電腦動物" + (AnimalBot.FreezeForTesting ? "站住了（測試暫停）" : "恢復行動"));
+                return;
+            }
+
+            if (action == "remove")
+            {
+                int removed = 0;
+                bool all = args.Length > 1 && args[1].ToLowerInvariant() == "all";
+                while (spawner.RemoveLastBot())
+                {
+                    removed++;
+                    if (!all)
+                    {
+                        break;
+                    }
+                }
+
+                Report(label, "移除了 " + removed + " 隻電腦動物，還剩 " + PlayerSpawner.BotCount + " 隻");
+                return;
+            }
+
+            Report(label, DescribeBots());
+        }
+
+        static string DescribeBots()
+        {
+            var builder = new StringBuilder();
+            builder.Append("電腦動物 ").Append(AnimalBot.All.Count).Append(" 隻｜找路資料=")
+                .Append(BotNavigation.IsReady ? "好了（" + Format(BotNavigation.LastBuildSeconds) + " 秒、" + BotNavigation.LastSourceCount + " 個碰撞）" : "還沒好");
+            for (int i = 0; i < AnimalBot.All.Count; i++)
+            {
+                AnimalBot bot = AnimalBot.All[i];
+                PlayerAvatar avatar = bot != null ? bot.Avatar : null;
+                if (avatar == null)
+                {
+                    continue;
+                }
+
+                builder.Append("\n    P").Append(avatar.PlayerNumber).Append(' ').Append(avatar.AvatarRole.Value)
+                    .Append(" 在做=").Append(bot.CurrentGoal)
+                    .Append(string.IsNullOrEmpty(bot.GoalDetail) ? "" : "（" + bot.GoalDetail + "）")
+                    .Append(bot.HasPath ? " 有路" : " 沒路")
+                    .Append(" 找路資料#").Append(bot.Filter.agentTypeID)
+                    .Append(UnityEngine.AI.NavMesh.SamplePosition(avatar.transform.position, out UnityEngine.AI.NavMeshHit hit, 1f, bot.Filter)
+                        ? "（站在可以走的地方）" : "（不在可以走的地方）")
+                    .Append(' ').Append(DescribeAvatar(avatar));
+            }
+
+            return builder.ToString();
         }
 
         /// <summary>模擬按住 ←→（和 ↑↓）方向鍵幾秒，回報鏡頭和身體轉了多少、走了多遠。</summary>
@@ -2302,11 +2390,11 @@ namespace AnimalEscape.EditorTools
                     continue;
                 }
 
-                builder.Append("\n    P").Append(avatar.PlayerNumber).Append(avatar.IsOwner ? "（我）" : "")
+                builder.Append("\n    P").Append(avatar.PlayerNumber).Append(avatar.IsMine ? "（我）" : "").Append(avatar.IsBot ? "（電腦）" : "")
                     .Append(' ').Append(avatar.AvatarRole.Value).Append(' ').Append(DescribeAvatar(avatar));
 
                 // 別人的名牌現在在我的畫面上會不會顯示（和遊戲介面用的是同一個判斷）
-                if (!avatar.IsOwner && playerCamera != null && playerCamera.Camera != null)
+                if (!avatar.IsMine && playerCamera != null && playerCamera.Camera != null)
                 {
                     builder.Append(GameHud.IsNameTagVisible(playerCamera.Camera, avatar) ? " 名牌=顯示" : " 名牌=不顯示");
                 }
@@ -2451,7 +2539,7 @@ namespace AnimalEscape.EditorTools
                 builder.Append(" 表情=").Append(PlayerParty.EmoteNames[party.CurrentEmote]);
             }
 
-            PlayerSlot slot = PlayerSlot.FindByClient(avatar.OwnerClientId);
+            PlayerSlot slot = avatar.Slot;
             if (slot != null && slot.TimesCaged.Value > 0)
             {
                 builder.Append(" 被關過=").Append(slot.TimesCaged.Value).Append("次");
@@ -2542,7 +2630,7 @@ namespace AnimalEscape.EditorTools
             for (int i = 0; i < PlayerAvatar.All.Count; i++)
             {
                 PlayerAvatar avatar = PlayerAvatar.All[i];
-                if (avatar != null && avatar.IsSpawned && avatar.IsOwner)
+                if (avatar != null && avatar.IsSpawned && avatar.IsMine)
                 {
                     return avatar;
                 }

@@ -316,7 +316,8 @@ namespace AnimalEscape.Players
             m_Avatar.AvatarRole.OnValueChanged += OnRoleChanged;
             FitNetCover();
 
-            if (IsOwner)
+            // 電腦玩家的角色在主機上也是 IsOwner，但它不讀鍵盤、也不是「這台電腦的玩家」。
+            if (IsOwner && !m_Avatar.IsBot)
             {
                 Local = this;
                 CreateInput();
@@ -842,7 +843,7 @@ namespace AnimalEscape.Players
         void ServerPutInCage(PlayerCapture animal, CaptureCage cage)
         {
             GameConfig config = GameConfig.Instance;
-            PlayerSlot slot = PlayerSlot.FindByClient(animal.OwnerClientId);
+            PlayerSlot slot = animal.Avatar != null ? animal.Avatar.Slot : null;
             int times = (slot != null ? slot.TimesCaged.Value : 0) + 1;
             if (slot != null)
             {
@@ -1099,7 +1100,7 @@ namespace AnimalEscape.Players
                 return;
             }
 
-            PlayerSlot slot = PlayerSlot.FindByClient(OwnerClientId);
+            PlayerSlot slot = m_Avatar != null ? m_Avatar.Slot : null;
             if (slot != null)
             {
                 slot.ReleasedFromLab.Value = true;

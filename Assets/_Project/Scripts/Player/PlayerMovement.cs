@@ -121,7 +121,8 @@ namespace AnimalEscape.Players
 
             CreateInput();
 
-            if (PlayerCamera.Instance != null)
+            // 電腦玩家的角色擁有者也是主機，但鏡頭只跟主機玩家自己的角色。
+            if (PlayerCamera.Instance != null && !m_Avatar.IsBot)
             {
                 PlayerCamera.Instance.SetTarget(transform, m_Avatar.AvatarRole.Value);
             }
@@ -150,7 +151,8 @@ namespace AnimalEscape.Players
             float deltaTime = Time.deltaTime;
 
             // 視窗不在最前面時不讀取輸入：同一台電腦開多個視窗測試時，只有正在操作的那個視窗的角色會動。
-            bool focused = Application.isFocused;
+            // 電腦玩家不讀鍵盤（它只用 SetExternalInput）。
+            bool focused = Application.isFocused && !m_Avatar.IsBot;
 
             // 以鏡頭方向為準的移動方向：WASD（手把左搖桿）往各方向走，A／D 是橫著走。
             // 方向鍵：↑↓ 前後走；←→ 預設是轉鏡頭（GameConfig.arrowKeyTurning，照《黎明死線》），關掉就和 A／D 一樣橫著走。
@@ -262,7 +264,7 @@ namespace AnimalEscape.Players
             m_Controller.Move(velocity * deltaTime);
             PushOutOfOtherCharacters();
 
-            if (playerCamera != null && playerCamera.IsFirstPerson)
+            if (playerCamera != null && playerCamera.IsFirstPerson && !m_Avatar.IsBot)
             {
                 // 第一人稱：身體永遠朝視線的方向，別人才看得出你在看哪裡。
                 transform.rotation = Quaternion.Euler(0f, playerCamera.Yaw, 0f);

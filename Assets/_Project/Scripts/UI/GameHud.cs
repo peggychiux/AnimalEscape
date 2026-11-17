@@ -128,7 +128,7 @@ namespace AnimalEscape.UI
         static string NameOf(PlayerCapture capture)
         {
             return capture != null && capture.Avatar != null
-                ? "P" + capture.Avatar.PlayerNumber + " " + capture.Avatar.Settings.displayName
+                ? "P" + capture.Avatar.PlayerNumber + " " + capture.Avatar.Settings.displayName + (capture.Avatar.IsBot ? "（電腦）" : "")
                 : "？";
         }
 
@@ -373,7 +373,8 @@ namespace AnimalEscape.UI
             {
                 PlayerSlot slot = rows[i];
                 Role role = slot.CurrentRole.Value;
-                string name = "P" + slot.PlayerNumber + " " + (role != Role.None ? GameConfig.Instance.GetRole(role).displayName : "");
+                string name = "P" + slot.PlayerNumber + " " + (role != Role.None ? GameConfig.Instance.GetRole(role).displayName : "")
+                    + (slot.IsBotSlot ? "（電腦）" : "");
                 string line = role == Role.Human ? name + "　抓人的一方" : name + "　" + ResultText(slot.Result.Value);
                 GUI.Label(new Rect(panel.x + 40f, y, panel.width - 80f, 22f), line, UiKit.Text);
                 y += 24f;
@@ -446,7 +447,7 @@ namespace AnimalEscape.UI
                 ? "按 E 換人看｜大螢幕正在播：" : "走到大螢幕前的控台按 E 換人看｜正在播：") + watching, UiKit.Center);
 
             MatchState match = MatchState.Instance;
-            PlayerSlot slot = PlayerSlot.FindByClient(mine.OwnerClientId);
+            PlayerSlot slot = mine.Avatar != null ? mine.Avatar.Slot : null;
             string rescue;
             if (match == null || match.Keycard.Value == KeycardStatus.None)
             {
@@ -706,7 +707,7 @@ namespace AnimalEscape.UI
             if (state == CaptureState.Caged)
             {
                 GameConfig config = GameConfig.Instance;
-                PlayerSlot slot = PlayerSlot.FindByClient(mine.OwnerClientId);
+                PlayerSlot slot = mine.Avatar != null ? mine.Avatar.Slot : null;
                 int times = slot != null ? slot.TimesCaged.Value : 1;
                 float total = Mathf.Max(1f, config.GetCageSeconds(times));
                 var panel = new Rect((width - 480f) * 0.5f, height - 176f, 480f, 124f);
@@ -961,8 +962,12 @@ namespace AnimalEscape.UI
             bool isAnimal = !choosing && local != null && Roles.IsAnimal(local.CurrentRole.Value);
             // 高度照實際的行數算：操作說明（方向鍵轉鏡頭時兩行）、選了身分之後的兩行說明＋換身分按鈕、動物另外四行。
             float helpLines = GameConfig.Instance.arrowKeyTurning ? 2f : 1f;
+            // 電腦動物的臨時按鈕（主機、比賽外才有；之後搬進主選單的測試模式）。
+            bool canManageBots = isHost && !playing && PlayerSpawner.Instance != null;
+            int botCount = PlayerSpawner.BotCount;
+            bool showBotMessage = Time.unscaledTime - s_BotMessageTime < 4f && !string.IsNullOrEmpty(s_BotMessage);
             float panelHeight = 168f + helpLines * 22f + playerCount * 22f + (hasCode ? 34f : 0f) + (choosing ? 0f : 116f) + (isAnimal ? 88f : 0f)
-                + (hasMap ? 24f : 0f) + (canChangeMap ? 36f : 0f);
+                + (hasMap ? 24f : 0f) + (canChangeMap ? 36f : 0f) + (canManageBots ? 36f : 0f) + (showBotMessage ? 22f : 0f);
             var panel = new Rect(12f, 12f, 300f, panelHeight);
 
             UiKit.Panel(panel);
@@ -1000,7 +1005,7 @@ namespace AnimalEscape.UI
                 string roleName = role != Role.None
                     ? GameConfig.Instance.GetRole(role).displayName
                     : (slot.LeftMatch.Value ? "離開了這一局" : "選擇中…");
-                string line = "P" + slot.PlayerNumber + "　" + roleName + (slot == local ? "（你）" : "");
+                string line = "P" + slot.PlayerNumber + "　" + roleName + (slot == local ? "（你）" : "") + (slot.IsBotSlot ? "（電腦）" : "");
                 GUILayout.Label(line, UiKit.Hint);
             }
 
@@ -1061,6 +1066,32 @@ namespace AnimalEscape.UI
                 }
             }
 
+            if (canManageBots)
+            {
+                // 臨時按鈕：加一隻電腦動物（挑第一個還沒人用的動物）、移除最後加的那一隻。
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("＋ 加電腦動物", UiKit.Button, GUILayout.Height(30f)))
+                {
+                    string reason;
+                    PlayerSlot bot = PlayerSpawner.Instance.AddBot(Role.None, out reason);
+                    s_BotMessage = bot != null ? "加了 P" + bot.PlayerNumber + "（電腦）" : "加不了：" + reason;
+                    s_BotMessageTime = Time.unscaledTime;
+                }
+
+                GUI.enabled = botCount > 0;
+                if (GUILayout.Button("－ 移除", UiKit.Button, GUILayout.Width(80f), GUILayout.Height(30f)))
+                {
+                    PlayerSpawner.Instance.RemoveLastBot();
+                }
+
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
+                if (showBotMessage)
+                {
+                    GUILayout.Label(s_BotMessage, UiKit.Hint);
+                }
+            }
+
             if (GUILayout.Button("離開房間", UiKit.Button, GUILayout.Height(30f)))
             {
                 connection.Leave();
@@ -1069,6 +1100,9 @@ namespace AnimalEscape.UI
             GUILayout.EndArea();
             return panel;
         }
+
+        static string s_BotMessage = "";
+        static float s_BotMessageTime = -100f;
 
         // ------------------------------------------------------------------
         // 選身分
@@ -1436,6 +1470,8 @@ namespace AnimalEscape.UI
             s_MarkerDot = null;
             s_MarkerText = null;
             s_MarkerKey = null;
+            s_BotMessage = "";
+            s_BotMessageTime = -100f;
         }
 
         static void EnsureMarkerStyles()
@@ -1611,7 +1647,7 @@ namespace AnimalEscape.UI
             for (int i = 0; i < PlayerAvatar.All.Count; i++)
             {
                 PlayerAvatar avatar = PlayerAvatar.All[i];
-                if (avatar == null || !avatar.IsSpawned || avatar.IsOwner)
+                if (avatar == null || !avatar.IsSpawned || avatar.IsMine)
                 {
                     continue;
                 }
@@ -1632,7 +1668,7 @@ namespace AnimalEscape.UI
                 // 螢幕座標的原點在左下角，IMGUI 在左上角，而且要換算成縮放後的座標。
                 float x = screen.x / scale;
                 float y = (Screen.height - screen.y) / scale;
-                string label = "P" + avatar.PlayerNumber + " " + settings.displayName;
+                string label = "P" + avatar.PlayerNumber + " " + settings.displayName + (avatar.IsBot ? "（電腦）" : "");
                 float tagWidth = 116f;
                 PlayerCapture capture = avatar.Capture;
                 if (capture != null)

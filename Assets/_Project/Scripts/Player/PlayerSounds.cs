@@ -189,7 +189,7 @@ namespace AnimalEscape.Players
             for (int i = 0; i < PlayerAvatar.All.Count; i++)
             {
                 PlayerAvatar avatar = PlayerAvatar.All[i];
-                if (avatar != null && avatar.IsSpawned && avatar.IsOwner)
+                if (avatar != null && avatar.IsSpawned && avatar.IsMine)
                 {
                     return avatar.Capture != null && avatar.Capture.IsInLab ? null : avatar;
                 }

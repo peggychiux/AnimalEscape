@@ -320,6 +320,39 @@ namespace AnimalEscape.Core
         [Tooltip("站在出口門前多深以內才算在開門（公尺，從牆面往地圖裡量）")]
         public float exitReach = 2.6f;
 
+        [Header("電腦動物（全部是初始值，待試玩調整）")]
+        [Tooltip("人類在這個距離以內、而且看得到，電腦動物就逃（公尺）")]
+        public float botSightDistance = 10f;
+
+        [Tooltip("人類在這個距離以內，看不看得到都會逃（像是聽到腳步聲；公尺）")]
+        public float botNoticeDistance = 4f;
+
+        [Tooltip("逃到離人類這麼遠就不逃了（公尺）")]
+        public float botSafeDistance = 15f;
+
+        [Tooltip("看不到人類之後，還會繼續逃幾秒")]
+        public float botFleeMemorySeconds = 3f;
+
+        [Tooltip("被網住或被扛著時，每秒連按幾下掙脫（真人大約 6～10 下）")]
+        public float botStrugglePerSecond = 7f;
+
+        [Tooltip("多久重新想一次要做什麼（秒）")]
+        public float botThinkInterval = 0.25f;
+
+        [Tooltip("每弄倒一樣東西，先慢慢閒晃幾秒再找下一個（最短、最長）。調小電腦動物會破壞得更快")]
+        public float botRestMin = 6f;
+        public float botRestMax = 14f;
+
+        [Tooltip("準備中（還沒按開始比賽）電腦動物也會動。關著的話它們站著等比賽開始")]
+        public bool botsActInLobby = false;
+
+        [Tooltip("往一個東西走了這麼久還弄不倒，就換一個（秒）")]
+        public float botGiveUpSeconds = 25f;
+
+        [Tooltip("找路用的身體大小（公尺）：半徑、高度。高度 1.0 表示不走通風管、不鑽桌底（第一版先不教捷徑）")]
+        public float botAgentRadius = 0.3f;
+        public float botAgentHeight = 1.0f;
+
         [Header("聲音（全部是初始值，待試玩調整）")]
         [Tooltip("人類跑步的腳步聲，動物在多遠以內聽得到（公尺）")]
         public float humanFootstepRangeRun = 20f;

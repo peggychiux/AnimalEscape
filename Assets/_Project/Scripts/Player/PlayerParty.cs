@@ -108,7 +108,7 @@ namespace AnimalEscape.Players
             m_Capture = GetComponent<PlayerCapture>();
             m_Movement = GetComponent<PlayerMovement>();
 
-            if (IsOwner)
+            if (IsOwner && !PlayerAvatar.IsBotObject(this))
             {
                 Local = this;
                 m_EmoteActions = new InputAction[EmoteCount];
@@ -168,7 +168,8 @@ namespace AnimalEscape.Players
 
         void Update()
         {
-            if (!IsSpawned || !IsOwner)
+            // 電腦玩家不參加派對（不做表情、不踢球）。
+            if (!IsSpawned || !IsOwner || (m_Avatar != null && m_Avatar.IsBot))
             {
                 return;
             }

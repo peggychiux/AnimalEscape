@@ -340,7 +340,7 @@ namespace AnimalEscape.Match
                     escaped++;
                 }
 
-                PlayerSlot slot = PlayerSlot.FindByClient(avatar.OwnerClientId);
+                PlayerSlot slot = avatar.Slot;
                 if (slot != null && slot.Result.Value == MatchResult.None)
                 {
                     slot.Result.Value = onTruck ? MatchResult.Escaped : MatchResult.Caught;

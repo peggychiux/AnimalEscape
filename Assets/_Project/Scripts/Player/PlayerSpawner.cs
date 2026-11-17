@@ -13,6 +13,7 @@ namespace AnimalEscape.Players
     /// 3. 開房時產生這一場的共用狀態（MatchState），裡面記錄用哪一張地圖。
     /// 規則：每一種身分都只能有一位（人類一位，四種動物各一隻）。
     /// 出生點跟著目前的地圖走（MapRegistry）：人類在研究室，動物在各自的收容區（門會重新鎖上），烏龜在池塘裡。
+    /// 4. 電腦玩家（AddBot／RemoveBot）：主機自己產生一個沒有連線的玩家狀態（擁有者是主機），角色由主機上的 AnimalBot 操作。
     /// </summary>
     public class PlayerSpawner : MonoBehaviour
     {
@@ -29,7 +30,8 @@ namespace AnimalEscape.Players
 
         NetworkManager m_Net;
 
-        // 主機端記錄：每位玩家目前的角色
+        // 主機端記錄：每位玩家目前的角色。鍵是玩家狀態（PlayerSlot）的 NetworkObjectId，
+        // 不是連線編號：電腦玩家的擁有者是主機，連線編號和主機自己一樣。
         readonly Dictionary<ulong, PlayerAvatar> m_Avatars = new Dictionary<ulong, PlayerAvatar>();
 
         void Awake()
@@ -87,14 +89,174 @@ namespace AnimalEscape.Players
             networkObject.Spawn(true);
         }
 
-        /// <summary>主機端：收掉所有人的角色，讓大家回到選身分（換地圖時用）。</summary>
+        /// <summary>
+        /// 主機端：收掉所有人的角色，讓大家回到選身分（換地圖時用）。電腦玩家也先收掉，
+        /// 新地圖開好之後由 RespawnBots 用原本的身分重新出生（不然它們會一直停在「選擇中」）。
+        /// </summary>
         public void ResetAllRoles()
         {
+            m_BotRolesToRestore.Clear();
             var slots = new List<PlayerSlot>(PlayerSlot.All);
             for (int i = 0; i < slots.Count; i++)
             {
-                AssignRole(slots[i], Role.None, true);
+                PlayerSlot slot = slots[i];
+                if (slot != null && slot.IsBotSlot && slot.CurrentRole.Value != Role.None)
+                {
+                    m_BotRolesToRestore[slot] = slot.CurrentRole.Value;
+                }
+
+                AssignRole(slot, Role.None, true);
             }
+        }
+
+        readonly Dictionary<PlayerSlot, Role> m_BotRolesToRestore = new Dictionary<PlayerSlot, Role>();
+
+        /// <summary>主機端（換地圖之後）：電腦玩家用原本的身分在新地圖重新出生。</summary>
+        public void RespawnBots()
+        {
+            foreach (KeyValuePair<PlayerSlot, Role> pair in m_BotRolesToRestore)
+            {
+                if (pair.Key != null && pair.Key.IsSpawned)
+                {
+                    AssignRole(pair.Key, pair.Value, true);
+                }
+            }
+
+            m_BotRolesToRestore.Clear();
+        }
+
+        // ------------------------------------------------------------------
+        // 電腦玩家
+        // ------------------------------------------------------------------
+
+        /// <summary>動物身分的預設順序（電腦動物沒指定身分時，挑第一個還沒人用的）。</summary>
+        static readonly Role[] k_BotRoleOrder = { Role.Rabbit, Role.Monkey, Role.Raccoon, Role.Turtle };
+
+        /// <summary>房間裡有幾個電腦玩家。</summary>
+        public static int BotCount
+        {
+            get
+            {
+                int count = 0;
+                for (int i = 0; i < PlayerSlot.All.Count; i++)
+                {
+                    if (PlayerSlot.All[i] != null && PlayerSlot.All[i].IsBotSlot)
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+        }
+
+        /// <summary>
+        /// 主機端：加一個電腦動物。preferred 是想要的身分（Role.None 表示隨便，挑第一個還沒人用的動物）。
+        /// 失敗時回傳 null，reason 寫原因（房間滿了、比賽中、四種動物都有人了…）。
+        /// </summary>
+        public PlayerSlot AddBot(Role preferred, out string reason)
+        {
+            reason = "";
+            if (m_Net == null || !m_Net.IsServer || slotPrefab == null)
+            {
+                reason = "不是主機";
+                return null;
+            }
+
+            if (MatchFlow.Instance != null && MatchFlow.Instance.IsPlaying)
+            {
+                reason = "比賽中不能加";
+                return null;
+            }
+
+            if (PlayerSlot.All.Count >= GameConfig.Instance.maxPlayers)
+            {
+                reason = "房間滿了（最多 " + GameConfig.Instance.maxPlayers + " 人，電腦也算）";
+                return null;
+            }
+
+            Role role = Role.None;
+            if (Roles.IsAnimal(preferred) && !IsRoleTakenByOther(null, preferred))
+            {
+                role = preferred;
+            }
+            else if (preferred != Role.None)
+            {
+                reason = Roles.IsAnimal(preferred) ? preferred + " 已經有人了" : "電腦玩家目前只能當動物";
+                return null;
+            }
+            else
+            {
+                for (int i = 0; i < k_BotRoleOrder.Length; i++)
+                {
+                    if (!IsRoleTakenByOther(null, k_BotRoleOrder[i]))
+                    {
+                        role = k_BotRoleOrder[i];
+                        break;
+                    }
+                }
+            }
+
+            if (role == Role.None)
+            {
+                reason = "四種動物都有人了";
+                return null;
+            }
+
+            GameObject instance = Instantiate(slotPrefab);
+            var networkObject = instance.GetComponent<NetworkObject>();
+            var slot = instance.GetComponent<PlayerSlot>();
+            if (networkObject == null || slot == null)
+            {
+                Destroy(instance);
+                reason = "玩家狀態的預製物有問題";
+                return null;
+            }
+
+            slot.PendingSeat = FindFreeSeat();
+            slot.PendingIsBot = true;
+            networkObject.Spawn(true);
+            AssignRole(slot, role, true);
+            return slot;
+        }
+
+        /// <summary>主機端：移除一個電腦玩家（角色和玩家狀態都收掉）。</summary>
+        public bool RemoveBot(PlayerSlot bot)
+        {
+            if (m_Net == null || !m_Net.IsServer || bot == null || !bot.IsSpawned || !bot.IsBotSlot)
+            {
+                return false;
+            }
+
+            AssignRole(bot, Role.None, true);
+            m_BotRolesToRestore.Remove(bot);
+            bot.GetComponent<NetworkObject>().Despawn(true);
+            return true;
+        }
+
+        /// <summary>主機端：移除編號最大的那個電腦玩家。沒有電腦玩家就回傳 false。</summary>
+        public bool RemoveLastBot()
+        {
+            PlayerSlot last = null;
+            for (int i = 0; i < PlayerSlot.All.Count; i++)
+            {
+                PlayerSlot slot = PlayerSlot.All[i];
+                if (slot != null && slot.IsSpawned && slot.IsBotSlot && (last == null || slot.PlayerNumber > last.PlayerNumber))
+                {
+                    last = slot;
+                }
+            }
+
+            return RemoveBot(last);
+        }
+
+        /// <summary>主機端：某個玩家狀態目前的角色（沒有就是 null）。</summary>
+        public PlayerAvatar GetAvatar(PlayerSlot slot)
+        {
+            PlayerAvatar avatar;
+            return slot != null && m_Avatars.TryGetValue(slot.NetworkObjectId, out avatar) && avatar != null && avatar.IsSpawned
+                ? avatar
+                : null;
         }
 
         void OnClientConnected(ulong clientId)
@@ -104,10 +266,14 @@ namespace AnimalEscape.Players
                 return;
             }
 
-            if (m_Net.ConnectedClientsIds.Count > GameConfig.Instance.maxPlayers)
+            // 人數上限包含電腦玩家；真人進來時位子不夠，就先讓一個電腦玩家出去。
+            if (m_Net.ConnectedClientsIds.Count + BotCount > GameConfig.Instance.maxPlayers)
             {
-                m_Net.DisconnectClient(clientId, "房間已滿");
-                return;
+                if (!RemoveLastBot() || m_Net.ConnectedClientsIds.Count > GameConfig.Instance.maxPlayers)
+                {
+                    m_Net.DisconnectClient(clientId, "房間已滿");
+                    return;
+                }
             }
 
             if (slotPrefab == null)
@@ -170,13 +336,28 @@ namespace AnimalEscape.Players
 
         void OnClientDisconnected(ulong clientId)
         {
-            // 玩家離線時，他的角色會由 Netcode 自動清掉，這裡只要移除記錄。
-            m_Avatars.Remove(clientId);
+            // 玩家離線時，他的角色會由 Netcode 自動清掉，這裡只要移除記錄（已經不在的、和屬於這位玩家的）。
+            var stale = new List<ulong>();
+            foreach (KeyValuePair<ulong, PlayerAvatar> pair in m_Avatars)
+            {
+                PlayerAvatar avatar = pair.Value;
+                if (avatar == null || !avatar.IsSpawned || (!avatar.IsBot && avatar.OwnerClientId == clientId))
+                {
+                    stale.Add(pair.Key);
+                }
+            }
+
+            for (int i = 0; i < stale.Count; i++)
+            {
+                m_Avatars.Remove(stale[i]);
+            }
         }
 
         void OnServerStopped(bool wasHost)
         {
             m_Avatars.Clear();
+            m_BotRolesToRestore.Clear();
+            BotNavigation.Clear();
         }
 
         /// <summary>
@@ -191,6 +372,7 @@ namespace AnimalEscape.Players
             }
 
             ulong clientId = slot.OwnerClientId;
+            ulong key = slot.NetworkObjectId;
 
             // 比賽中不能換身分（M4）；開始比賽、換地圖、離開遊戲這些由主機強制的不受影響。
             if (!force && MatchFlow.Instance != null && MatchFlow.Instance.IsPlaying)
@@ -201,7 +383,7 @@ namespace AnimalEscape.Players
             // 被網住、被扛著、關在籠子裡都不能換身分（不然換一下就逃掉了）；在實驗室裡可以（重新出生）。
             // 之後有了「比賽中」的流程（M4），比賽中一律不能換。
             PlayerAvatar current;
-            if (!force && m_Avatars.TryGetValue(clientId, out current) && current != null && current.IsSpawned
+            if (!force && m_Avatars.TryGetValue(key, out current) && current != null && current.IsSpawned
                 && current.Capture != null && current.Capture.State.Value != CaptureState.Free
                 && current.Capture.State.Value != CaptureState.InLab && current.Capture.State.Value != CaptureState.Escaped)
             {
@@ -222,12 +404,12 @@ namespace AnimalEscape.Players
 
             // 先收掉舊角色
             PlayerAvatar old;
-            if (m_Avatars.TryGetValue(clientId, out old) && old != null && old.IsSpawned)
+            if (m_Avatars.TryGetValue(key, out old) && old != null && old.IsSpawned)
             {
                 old.GetComponent<NetworkObject>().Despawn(true);
             }
 
-            m_Avatars.Remove(clientId);
+            m_Avatars.Remove(key);
             slot.CurrentRole.Value = role;
             slot.LeftMatch.Value = false;
 
@@ -261,8 +443,10 @@ namespace AnimalEscape.Players
             }
 
             avatar.PendingRole = role;
+            avatar.PendingIsBot = slot.IsBotSlot;
+            avatar.PendingSlotId = slot.NetworkObjectId;
             networkObject.SpawnWithOwnership(clientId, true);
-            m_Avatars[clientId] = avatar;
+            m_Avatars[key] = avatar;
         }
 
         /// <summary>
@@ -277,7 +461,7 @@ namespace AnimalEscape.Players
             }
 
             PlayerAvatar current;
-            if (!m_Avatars.TryGetValue(slot.OwnerClientId, out current) || current == null || !current.IsSpawned
+            if (!m_Avatars.TryGetValue(slot.NetworkObjectId, out current) || current == null || !current.IsSpawned
                 || current.Capture == null || !current.Capture.IsInLab)
             {
                 return;
@@ -311,7 +495,7 @@ namespace AnimalEscape.Players
 
                 Role role = slot.CurrentRole.Value;
                 PlayerAvatar avatar;
-                if (!m_Avatars.TryGetValue(slot.OwnerClientId, out avatar) || avatar == null || !avatar.IsSpawned
+                if (!m_Avatars.TryGetValue(slot.NetworkObjectId, out avatar) || avatar == null || !avatar.IsSpawned
                     || avatar.AvatarRole.Value != role || avatar.Capture == null)
                 {
                     // 沒有角色（不應該發生）就照舊產生一個。

@@ -33,6 +33,12 @@ namespace AnimalEscape.Players
         /// <summary>這台電腦自己的玩家狀態。</summary>
         public static PlayerSlot Local { get; private set; }
 
+        /// <summary>主機在產生前先填好：這是不是電腦玩家。</summary>
+        [System.NonSerialized] public bool PendingIsBot;
+
+        /// <summary>這是電腦玩家（主機產生的、沒有人在操作；擁有者是主機）。</summary>
+        public readonly NetworkVariable<bool> IsBot = new NetworkVariable<bool>(false);
+
         /// <summary>玩家目前的身分，由主機決定，所有人都看得到。</summary>
         public readonly NetworkVariable<Role> CurrentRole = new NetworkVariable<Role>(Role.None);
 
@@ -77,13 +83,22 @@ namespace AnimalEscape.Players
             get { return Seat.Value > 0 ? Seat.Value : (int)OwnerClientId + 1; }
         }
 
-        /// <summary>找出某位連線玩家的玩家狀態；找不到時回傳 null。</summary>
+        /// <summary>是不是電腦玩家（主機在產生前就知道，其他電腦等同步）。</summary>
+        public bool IsBotSlot
+        {
+            get { return IsBot.Value || (IsServer && PendingIsBot); }
+        }
+
+        /// <summary>
+        /// 找出某位連線玩家（真人）的玩家狀態；找不到時回傳 null。電腦玩家不算（它們的擁有者是主機，編號和主機一樣）。
+        /// 從角色找玩家狀態請用 PlayerAvatar.Slot。
+        /// </summary>
         public static PlayerSlot FindByClient(ulong clientId)
         {
             for (int i = 0; i < All.Count; i++)
             {
                 PlayerSlot slot = All[i];
-                if (slot != null && slot.IsSpawned && slot.OwnerClientId == clientId)
+                if (slot != null && slot.IsSpawned && slot.OwnerClientId == clientId && !slot.IsBotSlot)
                 {
                     return slot;
                 }
@@ -104,7 +119,12 @@ namespace AnimalEscape.Players
                 Seat.Value = PendingSeat;
             }
 
-            if (IsOwner)
+            if (IsServer && PendingIsBot)
+            {
+                IsBot.Value = true;
+            }
+
+            if (IsOwner && !IsBotSlot)
             {
                 Local = this;
             }

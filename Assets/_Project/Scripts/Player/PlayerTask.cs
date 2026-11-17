@@ -196,7 +196,8 @@ namespace AnimalEscape.Players
             m_Keycard = GetComponent<PlayerKeycard>();
             m_Lockpick = GetComponent<PlayerLockpick>();
 
-            if (IsOwner)
+            // 電腦玩家的角色在主機上也是 IsOwner，但它不讀鍵盤、也不是「這台電腦的玩家」。
+            if (IsOwner && !PlayerAvatar.IsBotObject(this))
             {
                 Local = this;
                 m_HoldAction = new InputAction("Task", InputActionType.Button);
@@ -252,7 +253,10 @@ namespace AnimalEscape.Players
             double now = Time.unscaledTimeAsDouble;
 
             // 告訴畫面「按 E 會弄倒哪一個」：那個東西會閃，頭上的標記換成 E（Breakable、GameHud 用）。
-            Breakable.LocalTarget = Kind.Value == TaskKind.Break ? Target.Value : (kind == TaskKind.Break ? target : -1);
+            if (m_Avatar.IsMine)
+            {
+                Breakable.LocalTarget = Kind.Value == TaskKind.Break ? Target.Value : (kind == TaskKind.Break ? target : -1);
+            }
 
             // 小東西按一下就倒：只在「按下去的那一下」送出，按住不放走過一排花盆不會全部弄倒。
             bool instant = kind == TaskKind.Break && GetDuration(kind, target) <= 0f;

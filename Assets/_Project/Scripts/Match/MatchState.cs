@@ -188,6 +188,12 @@ namespace AnimalEscape.Match
             {
                 flow.ServerResetToLobby();
             }
+
+            // 電腦玩家用原本的身分在新地圖重新出生。
+            if (PlayerSpawner.Instance != null)
+            {
+                PlayerSpawner.Instance.RespawnBots();
+            }
         }
 
         void OnMapChanged(int previous, int current)
