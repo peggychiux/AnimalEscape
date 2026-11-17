@@ -85,6 +85,14 @@ namespace AnimalEscape.EditorTools
     ///     report                列出這個視窗看到的連線狀態和所有角色的位置
     ///     nethash               列出這個視窗的連線設定雜湊和每個網路預製物的識別碼。虛擬玩家連不進來、
     ///                           主視窗出現「NetworkConfig mismatch」時，兩邊各下一次，比對哪裡不一樣
+    ///     ui list｜ui pick 名稱 第幾個｜ui radio 名稱｜ui click 名稱
+    ///                           （主視窗）操作 Project Settings 視窗裡的 UI Toolkit 元件，用元件的 name 指定。
+    ///                           背景操作打不開下拉選單，連結 Unity Cloud 專案時用這個代替滑鼠；list 也會列出連結狀態
+    ///     joincode 代碼          用代碼加入線上房間（Relay），連上了或失敗才回報
+    ///     build check｜build windows [dev]｜build mac [dev]
+    ///                           （主視窗，要先 stop）check 看打包模組裝了沒；windows／mac 打包到專案的 Builds/（不進版本控制），
+    ///                           dev 是 Development Build。打包別的平台時 Unity 會切換平台，打包完再切回原本的平台
+    ///     restart               （主視窗，要先 stop）重開 Unity，例如用 Unity Hub 裝了新的打包模組之後。場景有沒存的修改時不重開
     ///     wait 秒數
     ///     t0 時間 / until 秒數    多個視窗對時用：t0 設定共同的起點（1970 年起算的秒數），
     ///                           until 等到「起點之後第幾秒」才往下做
@@ -488,6 +496,28 @@ namespace AnimalEscape.EditorTools
 
                 case "setting":
                     RunSetting(label, args);
+                    break;
+
+                case "ui":
+                    RunUi(label, args);
+                    break;
+
+                case "joincode":
+                    StartJoinCode(label, args);
+                    break;
+
+                case "build":
+                    s_PauseAfterCommand = true;
+                    RunBuild(label, args);
+                    break;
+
+                case "restart":
+                    s_PauseAfterCommand = true;
+                    if (!s_IsVirtualPlayer)
+                    {
+                        RunRestart(label);
+                    }
+
                     break;
 
                 case "join":
@@ -1222,6 +1252,338 @@ namespace AnimalEscape.EditorTools
             PlayerSlot local = PlayerSlot.Local;
             string reply = local != null && Time.unscaledTime - local.DevReplyTime < 3f ? "｜上一個回覆=" + local.DevReply : "";
             Report(label, result + reply);
+        }
+
+        /// <summary>
+        /// ui list｜ui pick 名稱 第幾個｜ui radio 名稱｜ui click 名稱：操作 Project Settings 視窗（UI Toolkit）的元件。
+        /// 背景操作點下拉選單會開成系統選單、點不到選項，所以改用程式設定值；設定值和按按鈕都會觸發和用滑鼠一樣的回呼。
+        /// </summary>
+        static void RunUi(string label, string[] args)
+        {
+            string action = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
+            EditorWindow window = FindEditorWindow("Project Settings");
+            if (window == null)
+            {
+                Report(label, "失敗：Project Settings 視窗沒有開｜" + DescribeCloudLink());
+                return;
+            }
+
+            UnityEngine.UIElements.VisualElement root = window.rootVisualElement;
+            string name = args.Length > 1 ? args[1] : "";
+            switch (action)
+            {
+                case "list":
+                    Report(label, DescribeCloudLink() + "\n" + DescribeUi(root));
+                    return;
+
+                case "pick":
+                {
+                    var dropdown = UnityEngine.UIElements.UQueryExtensions.Q<UnityEngine.UIElements.DropdownField>(root, name);
+                    if (dropdown == null)
+                    {
+                        Report(label, "失敗：找不到下拉選單 " + name);
+                        return;
+                    }
+
+                    int index = args.Length > 2 ? Mathf.RoundToInt(Number(args, 2)) : -1;
+                    if (!dropdown.enabledInHierarchy || index < 0 || index >= dropdown.choices.Count)
+                    {
+                        Report(label, "失敗：" + name + " 不能選第 " + index + " 個（"
+                            + (dropdown.enabledInHierarchy ? "選單可以用" : "選單現在不能用") + "，共 " + dropdown.choices.Count + " 個選項）");
+                        return;
+                    }
+
+                    dropdown.value = dropdown.choices[index];
+                    Report(label, name + " 選了第 " + index + " 個");
+                    return;
+                }
+
+                case "radio":
+                {
+                    var radio = UnityEngine.UIElements.UQueryExtensions.Q<UnityEngine.UIElements.RadioButton>(root, name);
+                    if (radio == null || !radio.enabledInHierarchy)
+                    {
+                        Report(label, "失敗：找不到或不能選 " + name);
+                        return;
+                    }
+
+                    radio.value = true;
+                    Report(label, "選了 " + name);
+                    return;
+                }
+
+                case "click":
+                {
+                    var button = UnityEngine.UIElements.UQueryExtensions.Q<UnityEngine.UIElements.Button>(root, name);
+                    if (button == null || !button.enabledInHierarchy)
+                    {
+                        Report(label, "失敗：找不到或不能按 " + name);
+                        return;
+                    }
+
+                    FieldInfo field = typeof(UnityEngine.UIElements.Clickable).GetField("clicked", BindingFlags.Instance | BindingFlags.NonPublic);
+                    Action clicked = button.clickable != null && field != null ? field.GetValue(button.clickable) as Action : null;
+                    if (clicked == null)
+                    {
+                        Report(label, "失敗：" + name + " 沒有接任何動作");
+                        return;
+                    }
+
+                    clicked();
+                    Report(label, "按了 " + name);
+                    return;
+                }
+            }
+
+            Report(label, "失敗：看不懂 ui " + action);
+        }
+
+        static EditorWindow FindEditorWindow(string title)
+        {
+            foreach (EditorWindow candidate in Resources.FindObjectsOfTypeAll<EditorWindow>())
+            {
+                if (candidate != null && candidate.titleContent != null && candidate.titleContent.text == title)
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        static string DescribeCloudLink()
+        {
+            string userId = CloudProjectSettings.userId;
+            string projectId = CloudProjectSettings.projectId;
+            return "已登入 Unity=" + (string.IsNullOrEmpty(userId) || userId == "anonymous" ? "否" : "是")
+                + "｜雲端專案=" + (string.IsNullOrEmpty(projectId) ? "沒有連結" : CloudProjectSettings.projectName + "（" + projectId + "）")
+                + "｜組織=" + CloudProjectSettings.organizationName;
+        }
+
+        static string DescribeUi(UnityEngine.UIElements.VisualElement root)
+        {
+            var builder = new StringBuilder();
+            UnityEngine.UIElements.UQueryExtensions.Query<UnityEngine.UIElements.VisualElement>(root).ForEach(element =>
+            {
+                if (element.resolvedStyle.display == UnityEngine.UIElements.DisplayStyle.None)
+                {
+                    return;
+                }
+
+                string state = element.enabledInHierarchy ? "" : "（不能用）";
+                var dropdown = element as UnityEngine.UIElements.DropdownField;
+                var radio = element as UnityEngine.UIElements.RadioButton;
+                var button = element as UnityEngine.UIElements.Button;
+                var help = element as UnityEngine.UIElements.HelpBox;
+                if (dropdown != null)
+                {
+                    builder.Append("下拉 ").Append(dropdown.name).Append(state).Append(" = ").Append(dropdown.value)
+                        .Append("｜選項：").Append(string.Join("／", dropdown.choices)).Append('\n');
+                }
+                else if (radio != null)
+                {
+                    builder.Append("單選 ").Append(radio.name).Append(state).Append(' ').Append(radio.label)
+                        .Append(radio.value ? "（選了）" : "").Append('\n');
+                }
+                else if (button != null && !string.IsNullOrEmpty(button.name))
+                {
+                    builder.Append("按鈕 ").Append(button.name).Append(state).Append(' ').Append(button.text).Append('\n');
+                }
+                else if (help != null)
+                {
+                    builder.Append("說明 ").Append(help.text).Append('\n');
+                }
+            });
+
+            return builder.Length > 0 ? builder.ToString().TrimEnd('\n') : "（這一頁沒有下拉選單、單選或按鈕）";
+        }
+
+        /// <summary>
+        /// build check｜build windows [dev]｜build mac [dev]（只有主視窗，要先 stop）：打包到專案的 Builds/（不進版本控制）。
+        /// 打包別的平台時 Unity 會自己切換平台，打包完再切回原本的平台（會重新編譯一次）。
+        /// </summary>
+        static void RunBuild(string label, string[] args)
+        {
+            if (s_IsVirtualPlayer)
+            {
+                return;
+            }
+
+            string which = args.Length > 0 ? args[0].ToLowerInvariant() : "check";
+            bool windowsOk = BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Standalone, BuildTarget.StandaloneWindows64);
+            bool macOk = BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Standalone, BuildTarget.StandaloneOSX);
+            BuildTarget original = EditorUserBuildSettings.activeBuildTarget;
+            if (which == "check")
+            {
+                Report(label, "打包模組：Windows=" + (windowsOk ? "有" : "沒有") + "｜Mac=" + (macOk ? "有" : "沒有") + "｜現在的平台=" + original);
+                return;
+            }
+
+            if (EditorApplication.isPlaying)
+            {
+                Report(label, "失敗：要先 stop 才能打包");
+                return;
+            }
+
+            BuildTarget target;
+            string path;
+            if (which == "windows" || which == "win")
+            {
+                target = BuildTarget.StandaloneWindows64;
+                path = "Builds/Windows/AnimalEscape.exe";
+            }
+            else if (which == "mac")
+            {
+                target = BuildTarget.StandaloneOSX;
+                path = "Builds/Mac/AnimalEscape.app";
+            }
+            else
+            {
+                Report(label, "用法：build check｜build windows [dev]｜build mac [dev]");
+                return;
+            }
+
+            if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Standalone, target))
+            {
+                Report(label, "失敗：Unity 沒有裝 " + target + " 的打包模組（Unity Hub › 安裝 › 這個版本 › 加入模組）");
+                return;
+            }
+
+            var scenes = new System.Collections.Generic.List<string>();
+            foreach (EditorBuildSettingsScene scene in EditorBuildSettings.scenes)
+            {
+                if (scene.enabled)
+                {
+                    scenes.Add(scene.path);
+                }
+            }
+
+            bool development = args.Length > 1 && args[1].ToLowerInvariant() == "dev";
+            var options = new BuildPlayerOptions
+            {
+                scenes = scenes.ToArray(),
+                locationPathName = path,
+                target = target,
+                targetGroup = BuildTargetGroup.Standalone,
+                options = development ? BuildOptions.Development : BuildOptions.None,
+            };
+
+            Report(label, "開始打包 " + target + (development ? "（Development）" : "") + " → " + path + "（原本的平台=" + original + "）");
+            UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(options);
+            if (report == null)
+            {
+                Report(label, "失敗：打包沒有回傳結果（看 Console）");
+            }
+            else
+            {
+                var summary = report.summary;
+                var builder = new StringBuilder();
+                builder.Append("打包結果=").Append(summary.result)
+                    .Append("｜大小=").Append((summary.totalSize / 1048576.0).ToString("0.0", CultureInfo.InvariantCulture)).Append(" MB")
+                    .Append("｜花了 ").Append(summary.totalTime.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)).Append(" 秒")
+                    .Append("｜錯誤 ").Append(summary.totalErrors).Append("、警告 ").Append(summary.totalWarnings)
+                    .Append("｜輸出=").Append(summary.outputPath);
+                int shown = 0;
+                foreach (var step in report.steps)
+                {
+                    foreach (var message in step.messages)
+                    {
+                        if ((message.type == LogType.Error || message.type == LogType.Exception) && shown < 6)
+                        {
+                            builder.Append("\n    錯誤：").Append(message.content.Split('\n')[0]);
+                            shown++;
+                        }
+                    }
+                }
+
+                Report(label, builder.ToString());
+            }
+
+            if (EditorUserBuildSettings.activeBuildTarget != original)
+            {
+                EditorUserBuildSettings.SwitchActiveBuildTarget(BuildPipeline.GetBuildTargetGroup(original), original);
+                Report(label, "已切回原本的平台 " + original);
+            }
+        }
+
+        /// <summary>restart（只有主視窗，要先 stop）：重開 Unity（例如裝了新的打包模組之後，要重開才讀得到）。場景有沒存的修改時不重開。</summary>
+        static void RunRestart(string label)
+        {
+            if (EditorApplication.isPlaying)
+            {
+                Report(label, "失敗：要先 stop 才能重開");
+                return;
+            }
+
+            for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+            {
+                UnityEngine.SceneManagement.Scene scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                if (scene.isDirty)
+                {
+                    Report(label, "失敗：場景 " + scene.name + " 有沒存的修改，先不重開");
+                    return;
+                }
+            }
+
+            string projectPath = Path.GetDirectoryName(Application.dataPath);
+            Report(label, "重開 Unity：" + projectPath);
+            EditorApplication.OpenProject(projectPath);
+        }
+
+        /// <summary>joincode 代碼：用代碼加入線上房間（Relay），連上了或失敗才回報。</summary>
+        static void StartJoinCode(string label, string[] args)
+        {
+            if (args.Length < 1)
+            {
+                Report(label, "用法：joincode 代碼");
+                return;
+            }
+
+            string code = args[0];
+            double deadline = EditorApplication.timeSinceStartup + 40.0;
+            bool requested = false;
+            bool sawConnecting = false;
+            s_ActiveLabel = label;
+            s_Active = deltaTime =>
+            {
+                if (!EditorApplication.isPlaying)
+                {
+                    Report(label, "失敗：不在 Play 模式");
+                    return true;
+                }
+
+                ConnectionManager connection = ConnectionManager.Instance;
+                if (connection == null)
+                {
+                    return false;
+                }
+
+                if (!requested && connection.State == ConnectionState.Offline)
+                {
+                    requested = true;
+                    connection.JoinOnlineRoom(code);
+                }
+
+                if (connection.State == ConnectionState.Connecting)
+                {
+                    sawConnecting = true;
+                }
+
+                if (connection.State == ConnectionState.Connected && PlayerSlot.Local != null)
+                {
+                    Report(label, "已用代碼加入，我是 P" + PlayerSlot.Local.PlayerNumber + "｜代碼=" + connection.JoinCode);
+                    return true;
+                }
+
+                if ((requested && sawConnecting && connection.State == ConnectionState.Offline)
+                    || EditorApplication.timeSinceStartup > deadline)
+                {
+                    Report(label, "失敗：" + connection.StatusMessage);
+                    return true;
+                }
+
+                return false;
+            };
         }
 
         /// <summary>setting sens 7｜turn 200｜invert on|off｜volume 50｜fullscreen on|off｜reset｜show。</summary>

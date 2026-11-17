@@ -37,7 +37,7 @@
   - 沒有人工試玩過；路線順不順、會不會太空或太擠，要等使用者的感想。
   - 2026-11-17 起：每張地圖的籠舍區、育苗區、倉庫各縮小一塊，讓給收容區；出生點不再是「動物在西、人類在東」；
     水不再擋住所有人（見下面「開場越獄」）。上面 2026-11-16 的實測有些因此過時（例如「水擋住所有人」「人類只能走橋」）。
-- **還沒測的**：線上房間（Relay，專案尚未連結 Unity Cloud）；手把操作；第一人稱用滑鼠轉視角的手感；
+- **還沒測的**：兩台真的電腦在不同網路連線上房間（要先打包）；手把操作；第一人稱用滑鼠轉視角的手感；
   M2 和撬鎖的按鍵用真的鍵盤滑鼠按；有網路延遲時揮網準不準（主機是用它看到的位置判定，沒有做延遲補償）。
 - M2（追與抓）**已完成並實際執行驗證**（2026-11-15 晚上，主視窗＋Player 2＋Player 3，全部用 DevTestDriver）：
   - 揮網：正前方、範圍內網住最近的一隻；背後、太遠（3.4 公尺）、隔著樹籬都揮空；冷卻中和扛著時主機不理。
@@ -106,7 +106,7 @@
   - **還沒測**：**聲音本身我聽不到**，好不好聽、方向感對不對、音量要請使用者戴耳機聽；三個視窗（隊友聽到叫聲）；數值都要試玩後調。
 - **M4（混亂值、出口、結算）已完成並實際執行驗證**（2026-11-17，詳見下面「M4」那一段）。
 - **接下來的順序**（使用者 2026-11-17 決定）：M5（疊羅漢）先擱著，試玩之後再決定要不要做；**電腦動物**、**主選單**、**麻醉針**都已完成（見下面）。
-  下一步是找人試玩（M6），要先把線上房間（Unity Cloud）接起來（要使用者登入）。「叫保全推車來載」是使用者保留的另一種捕捉做法，之後再評估。
+  下一步是找人試玩（M6）；線上房間已經接好（見下面「線上房間」），接著要打包給別台電腦。「叫保全推車來載」是使用者保留的另一種捕捉做法，之後再評估。
 - **電腦動物（第一版）已完成並實際執行驗證**（2026-11-17 晚上，只有主視窗：我當人類、電腦當動物，全部用 DevTestDriver）：
   - **使用者定的範圍**：先做電腦動物（兩個人玩時一人當人類、電腦補動物），電腦人類之後再說。第一版會：撬鎖逃出收容區、
     找最近走得到的東西弄倒、看到人類就逃、被網住或被扛著連按掙脫、混亂值滿了去開出口和上貨車。
@@ -181,6 +181,18 @@
   - **實測**：扛起時睡 10 秒、過 3 秒掙脫值還是 0；10 秒到兔子跳到人類背後、人類踉蹌；扛著時瞬移到 5 號籠旁按 E 關進去（120 秒）；放下來繼續睡，再扛起來沒有重打（剩 0.9 秒照舊）；
     猴子走過去碰到睡在地上（還剩 8.3 秒）的兔子，牠馬上醒來、有 3 秒保護；Player 2 被麻醉時的畫面截圖看過。
   - **還沒測**：真人用鍵盤玩起來 10 秒夠不夠、會不會太好抓；數值都待試玩。
+- **線上房間（Relay）已連結並實際執行驗證**（2026-11-17 晚上，主視窗＋Player 2，DevTestDriver）：
+  - 專案已連結 Unity Cloud（專案 AnimalEscape，`ProjectSettings.asset` 的 `cloudProjectId`）。是使用者自己在 Edit > Project Settings > Services
+    選組織、選「Create a new cloud project」、按建立的：背景點擊打不開那一頁的下拉選單（會開成系統選單）。之後要動這一頁可以用測試工具的 `ui` 指令。
+  - Relay、Lobby **不用**另外到 Unity Cloud 網站開，連結完就能用。
+  - 實測：主視窗「建立房間 › 線上」拿到 6 碼代碼；Player 2 用 `joincode` 輸入代碼加入；兩邊各自選身分（人類、兔子）、走動，
+    兩邊看到的位置差不到 0.01 公尺；兩個視窗的 Console 沒有錯誤或警告。
+  - **還沒測**：兩台真的電腦在不同網路（要先打包）；延遲高時的手感；Relay 免費額度的用量。
+  - **Windows 打包**（2026-11-17 晚上）：使用者用 Unity Hub 幫 6000.3.25f1 裝了 Windows Build Support (Mono)（Hub 的「管理 › 管理模組」，
+    裝完要重開 Unity 才讀得到：`main restart`）。`main build windows` 33 秒打包成功（101 MB，18 個警告都是「平台不支援 Ray Tracing 著色器」），
+    打包完自動切回 macOS 平台。給朋友的是 `Builds/AnimalEscape-Windows.zip`（38 MB，不含 BurstDebugInformation 資料夾；`Builds/` 不進版本控制）。
+    打包版裡有雲端專案 ID（`globalgamemanagers`、`StreamingAssets/UnityServicesProjectConfiguration.json`）。**還沒在真的 Windows 上跑過。**
+    Hub 在背景時畫面不會重畫（截圖是舊的），選單也點不開，Hub 的操作請使用者自己點比較快。
 - M4 動工前和使用者討論定案的內容（細節寫進企劃書 3.2、3.3、3.4、7.1.1 和開發計畫的 M4）：
   按 E 破壞（小按一下、大按住 1～3 秒）、小中大 +2／5／10％、人類 15／25／40 公尺聽得到、每張地圖約 40 個、壞了不恢復；
   3 台控制台（按住 5 秒、−15％、冷卻 60 秒）；出口移到離收容區都遠的牆（A 北牆中間 x −3～3、B 西牆 z −9～−3、C 西牆 z −3～3，
@@ -520,6 +532,11 @@ Unity 在背景也照常運作，所以整個「改程式 → 編譯 → 進 Pla
    main devpanel on        打開 F1 面板（off 關掉）；dev 指令和面板的按鈕走同一段程式：
    main dev time 2 30      dev time 分 秒｜pause｜chaos 40｜chaos+10｜full｜openexit｜truck10｜restore｜swap Monkey｜habitats｜mylab｜release｜tp exit|lab|cage|spawn｜nextmap｜restart｜setup
    main setting sens 7     個人設定（sens／turn／invert／volume／fullscreen／reset；不給參數就是列出現在的值）
+   main ui list            Project Settings 視窗目前那一頁的下拉選單、單選、按鈕（列 name），和 Unity Cloud 連結狀態；
+   main ui pick 名稱 1      ui radio 名稱｜ui click 名稱：用程式選下拉選單第幾個、選單選、按按鈕（背景點不開下拉選單時用）
+   vp joincode 69RNF7      用代碼加入線上房間（Relay），連上了或失敗才回報；主視窗用 main create online 5 開房、main report 看「代碼=」
+   main build check        打包模組裝了沒；main build windows [dev]／main build mac [dev] 打包到 Builds/（Unity 會忙一陣子，打包完切回原本的平台）
+   main restart            重開 Unity（裝了新模組之後）；重開後只會執行之後才寫進去的指令，要每隔一陣子重寫一次直到有回應
    P1 hold rescue on       只按住救援鍵（或 hold pick on 撬鎖鍵、hold swipe on 刷卡鍵）不等結果，後面接 wait、shot 就能拍到進度條跑到一半；記得 hold … off
    main unlock rabbit      （主機）直接打開某個收容區，不用撬；lock 是鎖回去；身分可以寫 all
    all nethash             列出連線設定雜湊和每個網路預製物的識別碼（查 NetworkConfig mismatch 用）

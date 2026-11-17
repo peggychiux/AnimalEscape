@@ -2,15 +2,30 @@
 
 4 vs 1 非對稱多人逃脫遊戲的灰盒原型。企劃與開發計畫在 `Docs/`。
 
+## 下載遊戲（Windows）
+
+不用裝 Unity。在 Windows 的 PowerShell 貼上這一行：會下載最新版、解壓縮到桌面的 `AnimalEscape` 資料夾，然後打開遊戲。
+
+```powershell
+$ProgressPreference='SilentlyContinue'; $zip="$env:TEMP\AnimalEscape-Windows.zip"; Invoke-WebRequest -Uri "https://github.com/peggychiux/AnimalEscape/releases/latest/download/AnimalEscape-Windows.zip" -OutFile $zip; $desk=[Environment]::GetFolderPath('Desktop'); Expand-Archive -Path $zip -DestinationPath $desk -Force; Start-Process (Join-Path $desk 'AnimalEscape\AnimalEscape.exe')
+```
+
+也可以到 [Releases](https://github.com/peggychiux/AnimalEscape/releases/latest) 手動下載 `AnimalEscape-Windows.zip`，整個解壓縮後執行 `AnimalEscape\AnimalEscape.exe`（不能只拿出 exe）。
+第一次打開如果出現「Windows 已保護您的電腦」，按「其他資訊」→「仍要執行」；跳出防火牆詢問就按「允許」。
+
+一起玩：房主按「開始遊戲 › 建立房間」，連線方式選「線上（給代碼）」，把畫面上的 6 碼代碼傳給大家；其他人按「開始遊戲 › 加入房間」，輸入代碼後按「加入」。房主要一直開著遊戲，房主離開大家都會斷線。
+
+## 開發資訊
+
 - Unity 版本：**6000.3.25f1**（Unity 6.3 LTS）
 - 連線：Netcode for GameObjects 2.11.2 ＋ Multiplayer Services 2.4.1（Relay）
 - 目前進度：M0～M4、開場越獄、實驗室、電腦動物、**主選單**、**麻醉針**都完成了（2026-11-17，用測試工具在主視窗和 Player 2 視窗實際執行驗證）。
-  M5（疊羅漢）先擱著，下一步是找人試玩（M6）；線上房間還沒測，因為專案尚未連結 Unity Cloud。
+  M5（疊羅漢）先擱著，下一步是找人試玩（M6）；線上房間已連結 Unity Cloud，用同一台電腦的兩個視窗測過。
 - 地圖有**三張**（A 圓環、B 長廊、C 島群，都是 80 x 60 公尺的溫室＋研究設施），三張都保留，開房時選、遊戲中主機也能換。
 
 | 里程碑 | 內容 | 狀態 |
 |---|---|---|
-| M0 | 專案建置、本機與線上房間 | 完成（線上房間未測） |
+| M0 | 專案建置、本機與線上房間 | 完成（線上房間 2026-11-17 測過） |
 | M1 | 五種身分的尺寸與速度、選身分、灰盒地圖、通風管、鏡頭（人類第一人稱、動物第三人稱） | 完成 |
 | M2 | 追與抓：揮網、被網住與掙脫、扛走、隊友推撞 | 完成（數值都是初始值，待試玩調整） |
 | 開場越獄 | 動物開場關在收容區、撬鎖逃出；人類可以涉水、烏龜游得快；每種身分只能一位 | 完成（秒數和倍率是初始值，待試玩調整） |
@@ -65,10 +80,10 @@
 
 ### B. 兩台電腦（線上房間）
 
-1. **Edit > Project Settings > Services**，登入 Unity 帳號並連結一個 Unity Cloud 專案（免費）。
-   如果建立房間時顯示服務未啟用，到 Unity Cloud Dashboard 把這個專案的 **Relay** 和 **Lobby** 打開。
+1. 這個專案已經連結 Unity Cloud（**Edit > Project Settings > Services** 會顯示專案 AnimalEscape），
+   Relay 和 Lobby 不用另外到網站打開（2026-11-17 實測）。
 2. 一台按「開始遊戲 › 建立房間」，連線方式選「線上（給代碼）」，把左上角的房間代碼給另一台；另一台在「加入房間」輸入代碼後按「加入」。
-3. 另一台電腦可以開同一份專案，或用 **File > Build Profiles** 打包一份執行檔。
+3. 另一台電腦要有遊戲：用 **File > Build Profiles** 打包一份執行檔（Mac 給 Mac、Windows 給 Windows），或開同一份專案。
 
 ### 身分
 
