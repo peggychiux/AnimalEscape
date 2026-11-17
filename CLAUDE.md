@@ -352,6 +352,12 @@
   4. 回到使用者的資料夾：`git update-ref refs/remotes/origin/main <新的 commit>`，刪掉 bundle。
   這樣兩邊是同一個 commit，使用者之後自己 `git status` 也會顯示和 GitHub 同步。
 - 這個工作階段不能新建 GitHub repo（API 被限制在已接上的 repo）；需要新 repo 時請使用者建，或在他登入後用瀏覽器幫他建。
+  也不能建 GitHub Release（API 回 403「not permitted for this session type」），不能改 repo 設定（公開／私人）。
+- **給朋友的下載**（2026-11-17）：打包好的遊戲放在 `download` 分支（孤立分支，只有 zip 和 README，和 `main` 的歷史分開），
+  README 的下載指令用 `https://raw.githubusercontent.com/peggychiux/AnimalEscape/download/AnimalEscape-Windows.zip`。
+  更新遊戲時在雲端重做一個只有一個 commit 的 `download` 分支再 `git push -f origin download`，舊的 zip 才不會一直留在分支歷史裡。
+  使用者 2026-11-17 決定把 repo 改成**公開**（朋友要用 GPT 下載，私人 repo 下載不到），改公開要使用者自己在 GitHub 的 Settings 按。
+  公開前檢查過：所有 commit 都是 noreply 信箱，追蹤的檔案裡沒有信箱或金鑰。之後也不能把任何私人資料放進 repo。
 
 ## 架構規則
 

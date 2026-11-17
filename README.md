@@ -7,10 +7,10 @@
 不用裝 Unity。在 Windows 的 PowerShell 貼上這一行：會下載最新版、解壓縮到桌面的 `AnimalEscape` 資料夾，然後打開遊戲。
 
 ```powershell
-$ProgressPreference='SilentlyContinue'; $zip="$env:TEMP\AnimalEscape-Windows.zip"; Invoke-WebRequest -Uri "https://github.com/peggychiux/AnimalEscape/releases/latest/download/AnimalEscape-Windows.zip" -OutFile $zip; $desk=[Environment]::GetFolderPath('Desktop'); Expand-Archive -Path $zip -DestinationPath $desk -Force; Start-Process (Join-Path $desk 'AnimalEscape\AnimalEscape.exe')
+$ProgressPreference='SilentlyContinue'; $zip="$env:TEMP\AnimalEscape-Windows.zip"; Invoke-WebRequest -Uri "https://raw.githubusercontent.com/peggychiux/AnimalEscape/download/AnimalEscape-Windows.zip" -OutFile $zip; $desk=[Environment]::GetFolderPath('Desktop'); Expand-Archive -Path $zip -DestinationPath $desk -Force; Start-Process (Join-Path $desk 'AnimalEscape\AnimalEscape.exe')
 ```
 
-也可以到 [Releases](https://github.com/peggychiux/AnimalEscape/releases/latest) 手動下載 `AnimalEscape-Windows.zip`，整個解壓縮後執行 `AnimalEscape\AnimalEscape.exe`（不能只拿出 exe）。
+也可以直接下載 [AnimalEscape-Windows.zip](https://raw.githubusercontent.com/peggychiux/AnimalEscape/download/AnimalEscape-Windows.zip)（放在 `download` 分支），整個解壓縮後執行 `AnimalEscape\AnimalEscape.exe`（不能只拿出 exe）。
 第一次打開如果出現「Windows 已保護您的電腦」，按「其他資訊」→「仍要執行」；跳出防火牆詢問就按「允許」。
 
 一起玩：房主按「開始遊戲 › 建立房間」，連線方式選「線上（給代碼）」，把畫面上的 6 碼代碼傳給大家；其他人按「開始遊戲 › 加入房間」，輸入代碼後按「加入」。房主要一直開著遊戲，房主離開大家都會斷線。
