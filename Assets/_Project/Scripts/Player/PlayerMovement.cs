@@ -71,6 +71,12 @@ namespace AnimalEscape.Players
             get { return PlanarVelocity.magnitude; }
         }
 
+        /// <summary>
+        /// （擁有者端）不會游泳的動物現在人在水裡，正在爬上岸。正常情況進不了水，只有被放進去才會發生
+        /// （例如在水中央從人類肩上掙脫、四周又沒有岸可以落地）。
+        /// </summary>
+        public bool IsStranded { get; private set; }
+
         /// <summary>把上下方向的速度歸零（被別的程式搬到新位置之後呼叫，才不會帶著舊的掉落速度）。</summary>
         public void ResetVerticalSpeed()
         {
@@ -173,6 +179,8 @@ namespace AnimalEscape.Players
                 speed *= m_Capture.SpeedMultiplier;
             }
 
+            speed *= UpdateWater(config);
+
             PlanarVelocity = move * speed;
 
             // 跳躍與重力
@@ -209,6 +217,34 @@ namespace AnimalEscape.Players
             }
         }
 
+        /// <summary>
+        /// 水：回傳這一格的速度倍率，並決定自己現在會不會被水邊擋住。
+        /// - 會游泳的身分（GameConfig 的水中倍率大於 0：人類、烏龜）放在 Swimmer 圖層，水域的擋牆擋不住牠；
+        ///   人在水裡時速度乘上那個倍率（人類變慢、烏龜變快）。
+        /// - 不會游泳的身分平常在預設圖層，被擋牆擋在岸上。萬一人已經在水裡，就暫時讓牠穿過擋牆、慢慢爬上岸；
+        ///   一離開水就恢復，所以沒辦法再走回去。
+        /// </summary>
+        float UpdateWater(GameConfig config)
+        {
+            float multiplier = config.GetWaterSpeedMultiplier(m_Avatar.AvatarRole.Value);
+            bool swims = multiplier > 0f;
+            bool inWater = WaterZone.IsInWater(transform.position);
+            IsStranded = !swims && inWater;
+
+            int layer = swims || IsStranded ? GameLayers.Swimmer : 0;
+            if (gameObject.layer != layer)
+            {
+                gameObject.layer = layer;
+            }
+
+            if (!inWater)
+            {
+                return 1f;
+            }
+
+            return swims ? multiplier : config.strandedWaterSpeedMultiplier;
+        }
+
         const float k_MaxPushPerFrame = 0.25f;
         const float k_PushMargin = 0.04f;
 
@@ -235,8 +271,9 @@ namespace AnimalEscape.Players
                     continue;
                 }
 
-                // 被扛著的動物沒有碰撞（牠本來就貼在人類身上）。
-                if (other.Capture != null && other.Capture.State.Value == CaptureState.Carried)
+                // 被扛著的動物沒有碰撞（牠本來就貼在人類身上）；出局的角色已經不在場上。
+                if (other.Capture != null
+                    && (other.Capture.State.Value == CaptureState.Carried || other.Capture.State.Value == CaptureState.Out))
                 {
                     continue;
                 }

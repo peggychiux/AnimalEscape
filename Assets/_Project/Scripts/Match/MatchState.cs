@@ -6,7 +6,7 @@ namespace AnimalEscape.Match
 {
     /// <summary>
     /// 這一場比賽的共用狀態，由主機開房時產生一個，所有人都看得到。
-    /// 目前只記錄用哪一張地圖；之後倒數計時、混亂值、比賽階段也會放在這裡。
+    /// 目前記錄用哪一張地圖、哪幾個收容區的門已經被撬開；之後倒數計時、混亂值、比賽階段也會放在這裡。
     /// </summary>
     public class MatchState : NetworkBehaviour
     {
@@ -17,6 +17,35 @@ namespace AnimalEscape.Match
 
         /// <summary>目前用哪一張地圖（MapRegistry.maps 的編號），由主機決定。</summary>
         public readonly NetworkVariable<int> MapIndex = new NetworkVariable<int>(0);
+
+        /// <summary>
+        /// 哪幾個收容區的門已經開了：第 n 個位元對應 Role 的數值（例如兔子是 2）。
+        /// 動物每次出生（選身分）時，牠的收容區會重新鎖上；換地圖時全部重新鎖上。
+        /// </summary>
+        public readonly NetworkVariable<int> OpenHabitats = new NetworkVariable<int>(0);
+
+        /// <summary>這種動物的收容區，門是不是已經開了。</summary>
+        public bool IsHabitatOpen(Role role)
+        {
+            return (OpenHabitats.Value & (1 << (int)role)) != 0;
+        }
+
+        /// <summary>主機端：打開或鎖上某一種動物的收容區。</summary>
+        public void ServerSetHabitatOpen(Role role, bool open)
+        {
+            if (!IsServer || role == Role.None)
+            {
+                return;
+            }
+
+            int bit = 1 << (int)role;
+            int current = OpenHabitats.Value;
+            int wanted = open ? (current | bit) : (current & ~bit);
+            if (wanted != current)
+            {
+                OpenHabitats.Value = wanted;
+            }
+        }
 
         public override void OnNetworkSpawn()
         {
@@ -61,6 +90,8 @@ namespace AnimalEscape.Match
                 PlayerSpawner.Instance.ResetAllRoles();
             }
 
+            // 新地圖的收容區全部從鎖著開始。
+            OpenHabitats.Value = 0;
             registry.Select(index);
             MapIndex.Value = index;
         }

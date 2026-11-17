@@ -81,9 +81,36 @@ MonoBehaviour:
   pickupRange: 2
   carrySpeedMultiplier: 0.7
   bumpMinSpeed: 3.3
+  bumpReach: 0.2
   bumpCooldown: 1
   staggerSecondsOnBump: 2
   staggerSecondsOnEscape: 1.2
   staggerSpeedMultiplier: 0.3
+  humanWaterSpeedMultiplier: 0.5
+  turtleWaterSpeedMultiplier: 1.6
+  rabbitWaterSpeedMultiplier: 0
+  monkeyWaterSpeedMultiplier: 0
+  raccoonWaterSpeedMultiplier: 0
+  strandedWaterSpeedMultiplier: 0.5
+  waterSinkDepth: 0.35
+  raccoonLockpickSeconds: 5
+  monkeyLockpickSeconds: 8
+  rabbitLockpickSeconds: 11
+  turtleLockpickSeconds: 14
+  lockpickRange: 1.8
+  lockpickProtectRadius: 6
+  cageSeconds:
+  - 120
+  - 80
+  - 40
+  putInCageRange: 2.8
+  rescueSeconds: 3
+  rescueRange: 2.4
+  rescueProtectionSeconds: 5
+  protectedNetSlowSeconds: 1.5
+  protectedNetSlowMultiplier: 0.5
+  campRadius: 8
+  campSecondsBeforePause: 10
+  cageAlarmRadius: 15
   nameTagMaxDistance: 25
   virtualPlayersAutoJoinLocal: 1

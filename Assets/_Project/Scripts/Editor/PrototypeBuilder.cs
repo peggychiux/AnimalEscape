@@ -63,6 +63,13 @@ namespace AnimalEscape.EditorTools
         const float k_DoorHeight = 2.2f;
         const float k_VentSize = 0.8f;
 
+        // 收容區（開場時關動物的大籠子）
+        const float k_CageThickness = 0.12f;
+        const float k_GateWidth = 2f;
+        const float k_GateHeight = 2.4f;
+        const float k_PenHeight = 2.6f;
+        const float k_GroveHeight = 4.8f;
+
         class Palette
         {
             public Material Floor;
@@ -85,6 +92,10 @@ namespace AnimalEscape.EditorTools
             public Material Straw;
             public Material Tile;
             public Material Concrete;
+            public Material Cage;
+            public Material GateMesh;
+            public Material Lock;
+            public Material CaptureCage;
             public readonly Dictionary<Role, Material> Roles = new Dictionary<Role, Material>();
         }
 
@@ -165,6 +176,7 @@ namespace AnimalEscape.EditorTools
 
                 bool usingUrp = EnsureUrp();
                 PlayerSettings.runInBackground = true;
+                EnsureLayers();
 
                 GameConfig config = EnsureConfig();
                 Palette palette = BuildMaterials(config, usingUrp);
@@ -261,6 +273,39 @@ namespace AnimalEscape.EditorTools
             }
         }
 
+        /// <summary>
+        /// 專案用到的自訂圖層（編號在 GameLayers）：幫它們取名字，並設定「會游泳的角色不被水域擋牆擋住」。
+        /// </summary>
+        static void EnsureLayers()
+        {
+            SetLayerName(GameLayers.Bars, "Bars");
+            SetLayerName(GameLayers.Swimmer, "Swimmer");
+            Physics.IgnoreLayerCollision(GameLayers.Swimmer, GameLayers.Water, true);
+        }
+
+        static void SetLayerName(int index, string name)
+        {
+            UnityEngine.Object[] assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset");
+            if (assets == null || assets.Length == 0)
+            {
+                return;
+            }
+
+            var manager = new SerializedObject(assets[0]);
+            SerializedProperty layers = manager.FindProperty("layers");
+            if (layers == null || !layers.isArray || index >= layers.arraySize)
+            {
+                return;
+            }
+
+            SerializedProperty element = layers.GetArrayElementAtIndex(index);
+            if (element.stringValue != name)
+            {
+                element.stringValue = name;
+                manager.ApplyModifiedPropertiesWithoutUndo();
+            }
+        }
+
         static GameConfig EnsureConfig()
         {
             var config = AssetDatabase.LoadAssetAtPath<GameConfig>(k_ConfigPath);
@@ -306,6 +351,14 @@ namespace AnimalEscape.EditorTools
             palette.Straw = EnsureMaterial("FloorStraw", new Color(0.83f, 0.77f, 0.53f), usingUrp);
             palette.Tile = EnsureMaterial("FloorTile", new Color(0.76f, 0.84f, 0.90f), usingUrp);
             palette.Concrete = EnsureMaterial("FloorConcrete", new Color(0.47f, 0.48f, 0.51f), usingUrp);
+
+            // 收容區：半透明的鐵網、黃色的門（一眼看得出哪裡是出口）
+            palette.Cage = EnsureMaterial("CageMesh", new Color(0.78f, 0.82f, 0.86f, 0.22f), usingUrp);
+            MakeTransparent(palette.Cage);
+            palette.GateMesh = EnsureMaterial("GateMesh", new Color(1f, 0.82f, 0.20f, 0.35f), usingUrp);
+            MakeTransparent(palette.GateMesh);
+            palette.Lock = EnsureMaterial("Lock", new Color(0.98f, 0.78f, 0.12f), usingUrp);
+            palette.CaptureCage = EnsureMaterial("CaptureCage", new Color(0.86f, 0.24f, 0.22f), usingUrp);
 
             foreach (Role role in Roles.Selectable)
             {
@@ -447,10 +500,12 @@ namespace AnimalEscape.EditorTools
             networkTransform.SyncRotAngleX = false;
             networkTransform.SyncRotAngleZ = false;
 
-            // PlayerAvatar 要排在 PlayerMovement 前面；PlayerCapture（追與抓）排最後。
+            // PlayerAvatar 要排在 PlayerMovement 前面；PlayerCapture（追與抓）、PlayerLockpick（撬鎖）排後面。
             root.AddComponent<PlayerAvatar>();
             root.AddComponent<PlayerMovement>();
             root.AddComponent<PlayerCapture>();
+            root.AddComponent<PlayerLockpick>();
+            root.AddComponent<PlayerRescue>();
 
             foreach (Role role in Roles.Selectable)
             {
@@ -659,7 +714,15 @@ namespace AnimalEscape.EditorTools
         //   研究室：矮實驗台和高設備櫃交錯，部分高櫃底下有動物專用的管道
         //   倉庫：　高貨架排成要拐彎的窄巷，部分貨架底下有管道，貨車出口在這裡
         //
-        // 水域：角色走不進去（隱形擋牆），人類只能走橋，小動物另外有管道可以過。
+        // 水域：人類可以涉水但會變慢（走橋比較快），烏龜在水裡游得比走路快；兔子、猴子、浣熊進不去（隱形擋牆），
+        // 要走橋或鑽管道。倍率在 GameConfig 的「水」。
+        //
+        // 捕捉籠（M3）：每張地圖 5 個（BuildCaptureCages），紅色框的小籠子，人類把扛著的動物關進去。
+        // 位置 2026-11-17 和使用者確認過：放在主要動線上、散開，離收容區的門至少 10 公尺。
+        //
+        // 收容區（開場越獄）：每張地圖有三個有頂的大籠子（BuildHabitat，給範圍就自動蓋好），開場時動物關在裡面，
+        // 要到黃色的門邊按住 E 撬鎖才出得來：兔子在籠舍區旁的柵欄、猴子在育苗區旁罩著樹林的大籠子、
+        // 浣熊在倉庫旁的置物籠。烏龜沒有被關，直接出生在池塘裡。人類從研究室出發。
         // 執行時同一時間只開一張地圖，由 MapRegistry 切換。要改格局就改對應的 BuildMapXxx。
         // ------------------------------------------------------------------
 
@@ -697,16 +760,16 @@ namespace AnimalEscape.EditorTools
             return new MapInfo { displayName = displayName, summary = summary, root = root };
         }
 
-        /// <summary>設定出生點。四個動物出生點以 animalCenter 為中心，沿 animalStep 的方向排開。</summary>
-        static void SetSpawns(MapInfo map, Vector3 human, float humanYaw, Vector3 animalCenter, Vector3 animalStep, float animalYaw)
+        /// <summary>設定某個身分在這張地圖的出生點（每個身分一個）。</summary>
+        static void AddSpawn(MapInfo map, Role role, float x, float z, float yaw)
         {
-            Transform spawnRoot = Group(map.root.transform, "SpawnPoints");
-            map.humanSpawn = CreateSpawnPoint(spawnRoot, "Human Spawn", human, humanYaw);
-            map.animalSpawns = new Transform[4];
-            for (int i = 0; i < 4; i++)
+            Transform spawnRoot = map.root.transform.Find("SpawnPoints");
+            if (spawnRoot == null)
             {
-                map.animalSpawns[i] = CreateSpawnPoint(spawnRoot, "Animal Spawn " + (i + 1), animalCenter + animalStep * (i - 1.5f), animalYaw);
+                spawnRoot = Group(map.root.transform, "SpawnPoints");
             }
+
+            map.SetSpawn(role, CreateSpawnPoint(spawnRoot, role + " Spawn", new Vector3(x, 0.05f, z), yaw));
         }
 
         // ------------------------------------------------------------------
@@ -770,11 +833,18 @@ namespace AnimalEscape.EditorTools
                 TreeProp(garden, "Tree " + (i + 1), position.x, position.z, palette);
             }
 
-            // 四個角落的設施區
-            BuildCages(root, "Cages", -38f, -18f, 14f, 28.5f, palette);
+            // 四個角落的設施區。西北、西南、東南各讓出一塊給收容區。
+            BuildCages(root, "Cages", -38f, -28f, 14f, 28.5f, palette);
             BuildLab(root, "Lab", 18f, 38f, 14f, 28.5f, palette);
-            BuildNursery(root, "Nursery", -38f, -18f, -28.5f, -14f, palette);
-            BuildWarehouse(root, "Warehouse", 18f, 36f, -28.5f, -14f, palette);
+            BuildNursery(root, "Nursery", -38f, -28f, -28.5f, -14f, palette);
+            BuildWarehouse(root, "Warehouse", 24.5f, 36f, -28.5f, -14f, palette);
+
+            // 收容區：兔子在籠舍區旁、猴子在育苗區旁、浣熊在倉庫旁；烏龜直接泡在中央水池（西南那一塊）。
+            Transform habitats = Group(root, "Habitats");
+            BuildHabitat(map, habitats, "Rabbit Pen", Role.Rabbit, -26f, -18f, 16f, 27f, k_PenHeight, Side.South, palette.Straw, palette);
+            BuildHabitat(map, habitats, "Monkey Grove", Role.Monkey, -26.5f, -18f, -28f, -15f, k_GroveHeight, Side.East, palette.Grass, palette);
+            BuildHabitat(map, habitats, "Raccoon Locker", Role.Raccoon, 18f, 23f, -28f, -22f, k_PenHeight, Side.North, palette.Concrete, palette);
+            AddSpawn(map, Role.Turtle, -4.1f, -3.25f, 270f);
             ExitOnEastWall(root, "Truck Exit", -24f, -18f, palette);
 
             // 四邊中段：零星的掩體
@@ -793,8 +863,10 @@ namespace AnimalEscape.EditorTools
             Bush(edges, "West Hedge", -24.5f, 0f, 4f, 1.2f, 90f, palette);
             Bush(edges, "East Hedge", 24.5f, 0f, 4f, 1.2f, 90f, palette);
 
-            // 動物在西側中段，人類在東側中段，中間隔著整個溫室。
-            SetSpawns(map, new Vector3(37f, 0.05f, 0f), 270f, new Vector3(-37f, 0.05f, 0f), new Vector3(0f, 0f, -1.6f), 90f);
+            BuildCaptureCages(root, palette, new Vector2(0f, 7f), new Vector2(8f, 22.5f), new Vector2(4f, -23f), new Vector2(-33f, 0f), new Vector2(33f, 0f));
+
+            // 人類從東北角的研究室出發（站在實驗島之間的走道上，面向西南）。
+            AddSpawn(map, Role.Human, 28f, 21.25f, 225f);
             return map;
         }
 
@@ -857,11 +929,19 @@ namespace AnimalEscape.EditorTools
             Bridge(garden, "Pond Bridge", 20.8f, 23.2f, -6.5f, 6.5f, palette);
             WaterPipeAlongX(garden, "Pond Pipe", 16.65f, 3f, 4.15f, palette);
 
-            // 北側：籠舍區、研究室；南側：育苗區、倉庫
-            BuildCages(root, "Cages", -38f, -4.5f, 12.5f, 28.5f, palette);
-            BuildLab(root, "Lab", 4.5f, 38f, 12.5f, 28.5f, palette);
-            BuildNursery(root, "Nursery", -38f, -4.5f, -28.5f, -12.5f, palette);
-            BuildWarehouse(root, "Warehouse", 4.5f, 38f, -28.5f, -12.5f, palette);
+            // 北側：研究室（西）、籠舍區（東）；南側：育苗區（西）、倉庫（東）。
+            // 研究室放西邊，人類出生點才不會緊鄰東端的水池（烏龜的出生點）。
+            BuildLab(root, "Lab", -38f, -4.5f, 12.5f, 28.5f, palette);
+            BuildCages(root, "Cages", 4.5f, 27.5f, 12.5f, 28.5f, palette);
+            BuildNursery(root, "Nursery", -38f, -17f, -28.5f, -12.5f, palette);
+            BuildWarehouse(root, "Warehouse", 11.5f, 38f, -28.5f, -12.5f, palette);
+
+            // 收容區：兔子在籠舍區東邊、猴子在育苗區東邊、浣熊在倉庫西邊；烏龜泡在東端水池（橋的東邊那一塊）。
+            Transform habitats = Group(root, "Habitats");
+            BuildHabitat(map, habitats, "Rabbit Pen", Role.Rabbit, 29.5f, 38f, 15.5f, 27.5f, k_PenHeight, Side.South, palette.Straw, palette);
+            BuildHabitat(map, habitats, "Monkey Grove", Role.Monkey, -15.5f, -5f, -28f, -13.5f, k_GroveHeight, Side.North, palette.Grass, palette);
+            BuildHabitat(map, habitats, "Raccoon Locker", Role.Raccoon, 5f, 10f, -28f, -22f, k_PenHeight, Side.North, palette.Concrete, palette);
+            AddSpawn(map, Role.Turtle, 27.1f, 0f, 270f);
             ExitOnSouthWall(root, "Truck Exit", 26f, 32f, palette);
 
             // 南北兩側中間的通道
@@ -871,8 +951,11 @@ namespace AnimalEscape.EditorTools
             Crate(middle, "Middle Crate 2", -0.8f, -15.5f, 1f, palette);
             Crate(middle, "Middle Crate 3", 0.6f, 26f, 1f, palette);
 
-            // 動物在花園西端，人類在花園東端（水池後面）。
-            SetSpawns(map, new Vector3(36f, 0.05f, 0f), 270f, new Vector3(-37f, 0.05f, 0f), new Vector3(0f, 0f, -1.6f), 90f);
+            // 籠子南北交錯（使用者 2026-11-17：原本三個排在花園中線上「太過一直線」）。
+            BuildCaptureCages(root, palette, new Vector2(-35f, 4f), new Vector2(-16.5f, -1f), new Vector2(1.5f, -8.5f), new Vector2(0f, 15.5f), new Vector2(35.5f, -4f));
+
+            // 人類從西北的研究室出發（站在實驗島之間的走道上，面向東南）。
+            AddSpawn(map, Role.Human, -21.25f, 20.5f, 135f);
             return map;
         }
 
@@ -913,10 +996,17 @@ namespace AnimalEscape.EditorTools
             Water(stream, "Pond", 17f, 33f, -17f, -12f, palette);
 
             // 散落的設施「島」
-            BuildNursery(root, "Nursery", -37f, -16f, 15f, 28f, palette);
-            BuildCages(root, "Cages", 14f, 37.5f, 13f, 28f, palette);
+            BuildNursery(root, "Nursery", -37f, -27.5f, 15f, 28f, palette);
+            BuildCages(root, "Cages", 14f, 27.5f, 13f, 28f, palette);
             BuildLab(root, "Lab", -37.5f, -14f, -25f, -9f, palette);
-            BuildWarehouse(root, "Warehouse", 16f, 35.5f, -28.5f, -19.5f, palette);
+            BuildWarehouse(root, "Warehouse", 22.5f, 35.5f, -28.5f, -19.5f, palette);
+
+            // 收容區：猴子在育苗區東邊、兔子在籠舍區東邊、浣熊在倉庫西邊；烏龜泡在東南的水池。
+            Transform habitats = Group(root, "Habitats");
+            BuildHabitat(map, habitats, "Monkey Grove", Role.Monkey, -26f, -16f, 15f, 28f, k_GroveHeight, Side.East, palette.Grass, palette);
+            BuildHabitat(map, habitats, "Rabbit Pen", Role.Rabbit, 29f, 37.5f, 15.5f, 27.5f, k_PenHeight, Side.South, palette.Straw, palette);
+            BuildHabitat(map, habitats, "Raccoon Locker", Role.Raccoon, 16f, 21f, -28f, -22f, k_PenHeight, Side.North, palette.Concrete, palette);
+            AddSpawn(map, Role.Turtle, 25f, -14.5f, 270f);
             ExitOnEastWall(root, "Truck Exit", -27f, -21f, palette);
 
             // 花園：歪歪斜斜的樹籬、植栽箱和樹，沒有一條路是直的。
@@ -939,7 +1029,6 @@ namespace AnimalEscape.EditorTools
             Planter(garden, "Planter W1", -28f, 0f, 4f, 1f, 40f, palette);
             Bush(garden, "Hedge W1", -24f, -5f, 5f, 1.2f, -15f, palette);
             TreeProp(garden, "Tree W", -31f, 5f, palette);
-            Bush(garden, "Hedge W2", -22f, 14f, 4f, 1.2f, 0f, palette);
 
             Bush(garden, "Hedge S1", -6f, -14f, 5f, 1.2f, 25f, palette);
             Planter(garden, "Planter S1", 2f, -20f, 4f, 1f, -40f, palette);
@@ -950,8 +1039,10 @@ namespace AnimalEscape.EditorTools
             Crate(garden, "Crate S", -11f, -4.5f, 1f, palette);
             Crate(garden, "Crate E", 27f, -5f, 1.5f, palette);
 
-            // 動物在西側（溪流的西南岸），人類在東南角的水池旁，兩邊隔著溪流。
-            SetSpawns(map, new Vector3(36.5f, 0.05f, -14.5f), 270f, new Vector3(-36.5f, 0.05f, 0f), new Vector3(0f, 0f, -1.6f), 90f);
+            BuildCaptureCages(root, palette, new Vector2(0f, 19.5f), new Vector2(9f, 0.5f), new Vector2(26.5f, 0.5f), new Vector2(-20.5f, -1.5f), new Vector2(6.5f, -18.5f));
+
+            // 人類從西南的研究室出發（站在實驗島之間的走道上，面向東北）。
+            AddSpawn(map, Role.Human, -23f, -17f, 45f);
             return map;
         }
 
@@ -1161,6 +1252,267 @@ namespace AnimalEscape.EditorTools
         }
 
         // ------------------------------------------------------------------
+        // 捕捉籠（M3）
+        // ------------------------------------------------------------------
+
+        const float k_CaptureCageSize = 2.5f;
+        const float k_CaptureCageHeight = 1.6f;
+
+        /// <summary>一張地圖的捕捉籠，照給的順序編成 1、2、3…號（x, z 是籠子中心）。</summary>
+        static void BuildCaptureCages(Transform mapRoot, Palette palette, params Vector2[] centers)
+        {
+            Transform group = Group(mapRoot, "Capture Cages");
+            for (int i = 0; i < centers.Length; i++)
+            {
+                BuildCaptureCage(group, i + 1, centers[i].x, centers[i].y, palette);
+            }
+        }
+
+        /// <summary>
+        /// 捕捉籠：2.5 x 2.5 公尺、1.6 公尺高、有頂的鐵網籠子，紅色的框。碰撞在 Bars 圖層（和收容區一樣）：
+        /// 裡面的動物出不去、網子打不穿，但看得穿。沒有門：關進去和救出來都是由主機直接把動物搬進搬出。
+        /// 1.6 公尺比人類跳得上去的 1.3 公尺高，人類站不到頂上；兔子（1.8）和猴子（1.6）跳得上去，沒關係。
+        /// </summary>
+        static void BuildCaptureCage(Transform parent, int number, float x, float z, Palette palette)
+        {
+            float half = k_CaptureCageSize * 0.5f;
+            float height = k_CaptureCageHeight;
+            Transform cage = Pivot(parent, "Cage " + number, x, z, 0f);
+            var component = cage.gameObject.AddComponent<CaptureCage>();
+            component.number = number;
+            component.size = k_CaptureCageSize;
+
+            // 四面鐵網（用區域座標：籠子中心在原點）
+            CagePanel(cage, "North", true, half, -half, half, 0f, height, palette);
+            CagePanel(cage, "South", true, -half, -half, half, 0f, height, palette);
+            CagePanel(cage, "East", false, half, -half, half, 0f, height, palette);
+            CagePanel(cage, "West", false, -half, -half, half, 0f, height, palette);
+
+            // 頂
+            BarsCollider(cage, "Roof Collider", new Vector3(0f, height + 0.05f, 0f),
+                new Vector3(k_CaptureCageSize + k_CageThickness, 0.1f, k_CaptureCageSize + k_CageThickness));
+            CageVisual(cage, "Roof Mesh", new Vector3(0f, height + 0.01f, 0f), new Vector3(k_CaptureCageSize, 0.02f, k_CaptureCageSize), palette.Cage);
+
+            // 紅色的框：四根角柱、頂上一圈，遠遠就看得出是捕捉籠（收容區是黑框）。
+            float post = 0.12f;
+            for (int i = 0; i < 4; i++)
+            {
+                float px = i % 2 == 0 ? -half : half;
+                float pz = i < 2 ? -half : half;
+                CageVisual(cage, "Corner " + (i + 1), new Vector3(px, height * 0.5f, pz), new Vector3(post, height, post), palette.CaptureCage);
+            }
+
+            CageVisual(cage, "Frame North", new Vector3(0f, height, half), new Vector3(k_CaptureCageSize + post, post, post), palette.CaptureCage);
+            CageVisual(cage, "Frame South", new Vector3(0f, height, -half), new Vector3(k_CaptureCageSize + post, post, post), palette.CaptureCage);
+            CageVisual(cage, "Frame East", new Vector3(half, height, 0f), new Vector3(post, post, k_CaptureCageSize + post), palette.CaptureCage);
+            CageVisual(cage, "Frame West", new Vector3(-half, height, 0f), new Vector3(post, post, k_CaptureCageSize + post), palette.CaptureCage);
+
+            // 地上一圈紅色的底
+            CageVisual(cage, "Floor Mark", new Vector3(0f, 0.04f, 0f), new Vector3(k_CaptureCageSize + 0.6f, 0.02f, k_CaptureCageSize + 0.6f), palette.CaptureCage);
+        }
+
+        // ------------------------------------------------------------------
+        // 收容區（開場越獄）
+        // ------------------------------------------------------------------
+
+        enum Side
+        {
+            North,
+            South,
+            East,
+            West
+        }
+
+        /// <summary>
+        /// 收容區：一個有頂的大籠子，開場時把一種動物關在裡面。給範圍、高度、門開在哪一面就會自動蓋好，
+        /// 並把那種動物的出生點設在正中央（面向門）。
+        ///
+        /// 四面和頂都是看得穿的鐵網，碰撞放在 Bars 圖層：所有角色都過不去、網子也打不穿，但鏡頭和視線會略過它，
+        /// 所以關在裡面的動物用第三人稱看得到自己，外面的人也看得到裡面。
+        /// 門（HabitatGate）在其中一面的正中央，2 公尺寬、2.4 公尺高，鎖著時擋路；被撬開之後人類也進得來。
+        /// 高度要比裡面的動物跳得到的高度高（兔子 1.8、猴子 1.6 公尺），而且一定有頂，裡面放了東西也翻不出去。
+        /// </summary>
+        static void BuildHabitat(MapInfo map, Transform parent, string name, Role role,
+            float xMin, float xMax, float zMin, float zMax, float height, Side gateSide, Material floor, Palette palette)
+        {
+            Transform habitat = Group(parent, name);
+            float sizeX = xMax - xMin;
+            float sizeZ = zMax - zMin;
+            float centerX = (xMin + xMax) * 0.5f;
+            float centerZ = (zMin + zMax) * 0.5f;
+
+            FloorPatch(habitat, "Floor Tint", xMin, xMax, zMin, zMax, 0.035f, floor);
+
+            // 四面鐵網；有門的那一面中間留門洞。
+            CageSide(habitat, "North", true, zMax, xMin, xMax, height, gateSide == Side.North, palette);
+            CageSide(habitat, "South", true, zMin, xMin, xMax, height, gateSide == Side.South, palette);
+            CageSide(habitat, "East", false, xMax, zMin, zMax, height, gateSide == Side.East, palette);
+            CageSide(habitat, "West", false, xMin, zMin, zMax, height, gateSide == Side.West, palette);
+
+            // 頂：一整片碰撞，外觀是半透明的網面加幾根橫樑（橫樑跨短邊）。
+            Transform roof = Group(habitat, "Roof");
+            BarsCollider(roof, "Collider", new Vector3(centerX, height + 0.05f, centerZ),
+                new Vector3(sizeX + k_CageThickness, 0.1f, sizeZ + k_CageThickness));
+            CageVisual(roof, "Mesh", new Vector3(centerX, height + 0.01f, centerZ), new Vector3(sizeX, 0.02f, sizeZ), palette.Cage);
+            bool beamsAcrossZ = sizeX >= sizeZ;
+            float span = beamsAcrossZ ? sizeX : sizeZ;
+            int beams = Mathf.Max(1, Mathf.RoundToInt(span / 1.5f));
+            for (int i = 0; i <= beams; i++)
+            {
+                float t = (float)i / beams;
+                Vector3 center = beamsAcrossZ
+                    ? new Vector3(Mathf.Lerp(xMin, xMax, t), height + 0.04f, centerZ)
+                    : new Vector3(centerX, height + 0.04f, Mathf.Lerp(zMin, zMax, t));
+                Vector3 size = beamsAcrossZ ? new Vector3(0.08f, 0.08f, sizeZ) : new Vector3(sizeX, 0.08f, 0.08f);
+                CageVisual(roof, "Beam " + (i + 1), center, size, palette.Dark);
+            }
+
+            // 門：物件放在門洞正中央，自己的 +Z 朝外。
+            float gateX = centerX;
+            float gateZ = centerZ;
+            float gateYaw = 0f;
+            switch (gateSide)
+            {
+                case Side.North:
+                    gateZ = zMax;
+                    gateYaw = 0f;
+                    break;
+                case Side.South:
+                    gateZ = zMin;
+                    gateYaw = 180f;
+                    break;
+                case Side.East:
+                    gateX = xMax;
+                    gateYaw = 90f;
+                    break;
+                case Side.West:
+                    gateX = xMin;
+                    gateYaw = 270f;
+                    break;
+            }
+
+            Transform gate = Pivot(habitat, "Gate", gateX, gateZ, gateYaw);
+            var gateComponent = gate.gameObject.AddComponent<HabitatGate>();
+            gateComponent.role = role;
+            gateComponent.interiorCenter = new Vector3(centerX, height * 0.5f, centerZ);
+            gateComponent.interiorSize = new Vector3(sizeX, height, sizeZ);
+            gateComponent.blocker = BarsCollider(gate, "Blocker", new Vector3(0f, k_GateHeight * 0.5f, 0f),
+                new Vector3(k_GateWidth, k_GateHeight, k_CageThickness)).GetComponent<Collider>();
+
+            // 門板掛在一邊的門軸上（打開時整片往外轉），黃色的框和一個掛鎖，遠遠就認得出來。
+            Transform hinge = Group(gate, "Hinge");
+            hinge.localPosition = new Vector3(-k_GateWidth * 0.5f, 0f, 0f);
+            gateComponent.hinge = hinge;
+            float w = k_GateWidth;
+            float h = k_GateHeight;
+            CageVisual(hinge, "Mesh", new Vector3(w * 0.5f, h * 0.5f, 0f), new Vector3(w - 0.1f, h - 0.1f, 0.03f), palette.GateMesh);
+            CageVisual(hinge, "Post Hinge", new Vector3(0.05f, h * 0.5f, 0f), new Vector3(0.1f, h, 0.1f), palette.Lock);
+            CageVisual(hinge, "Post Latch", new Vector3(w - 0.05f, h * 0.5f, 0f), new Vector3(0.1f, h, 0.1f), palette.Lock);
+            CageVisual(hinge, "Rail Top", new Vector3(w * 0.5f, h - 0.05f, 0f), new Vector3(w, 0.1f, 0.1f), palette.Lock);
+            CageVisual(hinge, "Rail Middle", new Vector3(w * 0.5f, 1.1f, 0f), new Vector3(w, 0.1f, 0.1f), palette.Lock);
+            CageVisual(hinge, "Rail Bottom", new Vector3(w * 0.5f, 0.08f, 0f), new Vector3(w, 0.1f, 0.1f), palette.Lock);
+            CageVisual(hinge, "Padlock", new Vector3(w - 0.28f, 1.1f, 0f), new Vector3(0.32f, 0.4f, 0.34f), palette.Dark);
+
+            // 門裡門外的地上各一塊黃色記號（門打開之後還在，標出門的位置）。
+            CageVisual(gate, "Mark Inside", new Vector3(0f, 0.045f, -0.85f), new Vector3(w, 0.02f, 1.4f), palette.Lock);
+            CageVisual(gate, "Mark Outside", new Vector3(0f, 0.045f, 0.85f), new Vector3(w, 0.02f, 1.4f), palette.Lock);
+
+            // 裡面的擺設放在四個角落附近，正中央到門口那一條保持淨空。
+            Transform props = Group(habitat, "Props");
+            float px = sizeX * 0.25f;
+            float pz = sizeZ * 0.25f;
+            switch (role)
+            {
+                case Role.Monkey:
+                    TreeProp(props, "Tree 1", centerX - px, centerZ - pz, palette);
+                    TreeProp(props, "Tree 2", centerX + px, centerZ + pz, palette);
+                    Platform(props, "Log", centerX - px, centerZ + pz, 1.6f, 0.6f, 0.5f, palette);
+                    break;
+                case Role.Rabbit:
+                    Platform(props, "Straw Bale 1", centerX - px, centerZ - pz, 1.2f, 0.8f, 0.5f, palette);
+                    Platform(props, "Straw Bale 2", centerX + px, centerZ + pz, 1.2f, 0.8f, 0.5f, palette);
+                    break;
+                case Role.Raccoon:
+                    Crate(props, "Box 1", centerX - px, centerZ - pz, 0.8f, palette);
+                    Crate(props, "Box 2", centerX + px, centerZ + pz, 0.6f, palette);
+                    break;
+            }
+
+            // 出生點在正中央，面向門。
+            AddSpawn(map, role, centerX, centerZ, gateYaw);
+        }
+
+        /// <summary>收容區的一面鐵網。hasGate 為 true 時，正中間留一個門洞（門洞上方補一片）。</summary>
+        static void CageSide(Transform parent, string name, bool alongX, float fixedCoordinate, float from, float to,
+            float height, bool hasGate, Palette palette)
+        {
+            Transform side = Group(parent, "Side " + name);
+            if (!hasGate)
+            {
+                CagePanel(side, "Panel", alongX, fixedCoordinate, from, to, 0f, height, palette);
+                return;
+            }
+
+            float middle = (from + to) * 0.5f;
+            float half = k_GateWidth * 0.5f;
+            CagePanel(side, "Panel A", alongX, fixedCoordinate, from, middle - half, 0f, height, palette);
+            CagePanel(side, "Panel B", alongX, fixedCoordinate, middle + half, to, 0f, height, palette);
+            CagePanel(side, "Panel Above Gate", alongX, fixedCoordinate, middle - half, middle + half, k_GateHeight, height, palette);
+        }
+
+        /// <summary>
+        /// 一片鐵網：碰撞是一整片（Bars 圖層），外觀是半透明的網面、上緣的橫桿、每隔約 1.2 公尺一根直桿。
+        /// </summary>
+        static void CagePanel(Transform parent, string name, bool alongX, float fixedCoordinate, float from, float to,
+            float bottom, float top, Palette palette)
+        {
+            float length = to - from;
+            float tall = top - bottom;
+            if (length < 0.05f || tall < 0.05f)
+            {
+                return;
+            }
+
+            Transform panel = Group(parent, name);
+            float middle = (from + to) * 0.5f;
+            float middleY = (bottom + top) * 0.5f;
+            Vector3 center = alongX ? new Vector3(middle, middleY, fixedCoordinate) : new Vector3(fixedCoordinate, middleY, middle);
+            BarsCollider(panel, "Collider", center,
+                alongX ? new Vector3(length, tall, k_CageThickness) : new Vector3(k_CageThickness, tall, length));
+            CageVisual(panel, "Mesh", center, alongX ? new Vector3(length, tall, 0.02f) : new Vector3(0.02f, tall, length), palette.Cage);
+
+            Vector3 railCenter = alongX ? new Vector3(middle, top - 0.04f, fixedCoordinate) : new Vector3(fixedCoordinate, top - 0.04f, middle);
+            CageVisual(panel, "Top Rail", railCenter, alongX ? new Vector3(length, 0.08f, 0.08f) : new Vector3(0.08f, 0.08f, length), palette.Dark);
+
+            int sections = Mathf.Max(1, Mathf.RoundToInt(length / 1.2f));
+            for (int i = 0; i <= sections; i++)
+            {
+                float along = Mathf.Lerp(from, to, (float)i / sections);
+                Vector3 postCenter = alongX ? new Vector3(along, middleY, fixedCoordinate) : new Vector3(fixedCoordinate, middleY, along);
+                CageVisual(panel, "Post " + (i + 1), postCenter, new Vector3(0.08f, tall, 0.08f), palette.Dark);
+            }
+        }
+
+        /// <summary>看不見的碰撞，放在 Bars 圖層（角色過不去、網子打不穿；鏡頭和視線會略過它）。</summary>
+        static GameObject BarsCollider(Transform parent, string name, Vector3 center, Vector3 size)
+        {
+            var blocker = new GameObject(name);
+            blocker.transform.SetParent(parent, false);
+            blocker.transform.localPosition = center;
+            blocker.layer = GameLayers.Bars;
+            blocker.AddComponent<BoxCollider>().size = size;
+            return blocker;
+        }
+
+        /// <summary>只有外觀、沒有碰撞也沒有影子的方塊（鐵網的網面和桿子）。</summary>
+        static void CageVisual(Transform parent, string name, Vector3 center, Vector3 size, Material material)
+        {
+            GameObject visual = CreateBlock(parent, name, center, size, material);
+            RemoveCollider(visual);
+            visual.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+
+        // ------------------------------------------------------------------
         // 積木
         // ------------------------------------------------------------------
 
@@ -1228,7 +1580,9 @@ namespace AnimalEscape.EditorTools
         }
 
         /// <summary>
-        /// 水域：一片貼地的水面，加上一道看不見的擋牆，角色走不進去也跳不過去。
+        /// 水域：一片貼地的水面，加上一道看不見的擋牆（同時也是 WaterZone，用來判斷「是不是在水裡」）。
+        /// 不會游泳的角色（兔子、猴子、浣熊）被擋牆擋住，走不進去也跳不過去；會游泳的（人類、烏龜）在 Swimmer 圖層，
+        /// 可以直接走進去，速度依 GameConfig 的水中倍率改變，外觀會往下沉一截。
         /// 擋牆放在 Water 圖層，鏡頭和「看不看得到對方」的判斷會略過它，所以隔著水還是看得到對岸。
         /// </summary>
         static void Water(Transform parent, string name, float xFrom, float xTo, float zFrom, float zTo, Palette palette)
@@ -1240,12 +1594,13 @@ namespace AnimalEscape.EditorTools
             GameObject surface = CreateBlock(parent, name, center + Vector3.up * 0.03f, new Vector3(sizeX, 0.06f, sizeZ), palette.Water);
             RemoveCollider(surface);
 
-            WaterBlocker(parent, name + " Blocker", center + Vector3.up * 1.5f, new Vector3(sizeX, 3f, sizeZ));
+            WaterBlocker(parent, name + " Blocker", center + Vector3.up * 1.5f, new Vector3(sizeX, 3f, sizeZ))
+                .AddComponent<WaterZone>();
         }
 
         /// <summary>
         /// 橫跨水域的管道（沿 X）。和一般管道一樣，另外在管道上方加一道看不見的擋牆，
-        /// 免得有人跳到管道頂上，從兩片水域中間走過去。
+        /// 免得不會游泳的動物（猴子）跳到管道頂上，從兩片水域中間走過去。會游泳的角色不受這道擋牆影響。
         /// </summary>
         static void WaterPipeAlongX(Transform parent, string name, float centerX, float z, float halfLength, Palette palette)
         {
@@ -1261,13 +1616,14 @@ namespace AnimalEscape.EditorTools
         }
 
         /// <summary>看不見的擋牆，放在 Water 圖層（鏡頭和視線判斷會略過它）。</summary>
-        static void WaterBlocker(Transform parent, string name, Vector3 center, Vector3 size)
+        static GameObject WaterBlocker(Transform parent, string name, Vector3 center, Vector3 size)
         {
             var blocker = new GameObject(name);
             blocker.transform.SetParent(parent, false);
             blocker.transform.localPosition = center;
             blocker.layer = GameLayers.Water;
             blocker.AddComponent<BoxCollider>().size = size;
+            return blocker;
         }
 
         /// <summary>

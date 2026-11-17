@@ -30,6 +30,13 @@ namespace AnimalEscape.Players
         CharacterController m_Controller;
         Renderer[] m_BodyRenderers = new Renderer[0];
         bool m_BodyHidden;
+        Transform m_Visual;
+
+        /// <summary>這個角色現在是不是在水裡（每台電腦各自用牠的位置判斷，被扛著的不算）。</summary>
+        public bool InWater { get; private set; }
+
+        /// <summary>在水裡時外觀往下沉了多少（公尺）。第一人稱的鏡頭也會跟著低一點。</summary>
+        public float Sink { get; private set; }
 
         public RoleSettings Settings
         {
@@ -55,6 +62,12 @@ namespace AnimalEscape.Players
 
             m_Controller = GetComponent<CharacterController>();
             Capture = GetComponent<PlayerCapture>();
+
+            // 聲音（腳步聲、鈴鐺、叫聲）在生成時才加上，不放在預製物裡：每台電腦各自處理，不需要連線。
+            if (GetComponent<PlayerSounds>() == null)
+            {
+                gameObject.AddComponent<PlayerSounds>();
+            }
 
             if (IsServer && PendingRole != Role.None)
             {
@@ -91,27 +104,60 @@ namespace AnimalEscape.Players
             m_Controller.skinWidth = Mathf.Max(0.01f, settings.radius * 0.08f);
             m_Controller.stepOffset = Mathf.Min(0.3f, height * 0.35f);
 
-            // 被扛著的角色不需要碰撞（位置由 PlayerCapture 直接擺到人類肩上），其他情況都要打開。
-            m_Controller.enabled = Capture == null || Capture.State.Value != CaptureState.Carried;
+            // 被扛著的角色不需要碰撞（位置由 PlayerCapture 直接擺到人類肩上）；出局的角色也不需要。其他情況都要打開。
+            m_Controller.enabled = Capture == null
+                || (Capture.State.Value != CaptureState.Carried && Capture.State.Value != CaptureState.Out);
+
+            // 會游泳的身分放在 Swimmer 圖層（不被水域的擋牆擋住）。擁有者端之後由 PlayerMovement 每一格維護。
+            gameObject.layer = GameConfig.Instance.CanEnterWater(role) ? GameLayers.Swimmer : 0;
 
             // 只顯示符合身分的外觀
             string wanted = VisualPrefix + role;
             m_BodyRenderers = new Renderer[0];
+            m_Visual = null;
             for (int i = 0; i < transform.childCount; i++)
             {
                 Transform child = transform.GetChild(i);
                 if (child.name.StartsWith(VisualPrefix))
                 {
                     bool active = child.name == wanted;
+                    child.localPosition = Vector3.zero;
                     child.gameObject.SetActive(active);
                     if (active)
                     {
+                        m_Visual = child;
                         m_BodyRenderers = child.GetComponentsInChildren<Renderer>(true);
                     }
                 }
             }
 
+            Sink = 0f;
             ApplyBodyHidden();
+        }
+
+        void Update()
+        {
+            if (!IsSpawned)
+            {
+                return;
+            }
+
+            // 在水裡時把外觀往下沉一截（下半身沒入地板底下），看起來像泡在水裡。只是外觀，碰撞和位置不變。
+            bool carried = Capture != null && Capture.State.Value == CaptureState.Carried;
+            InWater = !carried && WaterZone.IsInWater(transform.position);
+            float target = InWater ? Mathf.Min(GameConfig.Instance.waterSinkDepth, Settings.height * 0.6f) : 0f;
+            Sink = carried ? 0f : Mathf.MoveTowards(Sink, target, 1.5f * Time.deltaTime);
+            if (m_Visual != null)
+            {
+                m_Visual.localPosition = new Vector3(0f, -Sink, 0f);
+
+                // 出局的角色從場上消失（每台電腦都一樣）。
+                bool show = Capture == null || Capture.State.Value != CaptureState.Out;
+                if (m_Visual.gameObject.activeSelf != show)
+                {
+                    m_Visual.gameObject.SetActive(show);
+                }
+            }
         }
 
         /// <summary>這台電腦上，這個角色的身體目前是不是藏起來的。</summary>

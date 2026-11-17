@@ -11,8 +11,8 @@ namespace AnimalEscape.Players
     /// 1. 玩家連進來時，幫他產生一個玩家狀態（PlayerSlot）。
     /// 2. 玩家選好身分後，在對應的出生點產生角色（PlayerAvatar）；換身分時先收掉舊的再產生新的。
     /// 3. 開房時產生這一場的共用狀態（MatchState），裡面記錄用哪一張地圖。
-    /// 規則：人類只能有一位；動物目前可以重複選（企劃書裡還是待定）。
-    /// 出生點跟著目前的地圖走（MapRegistry）。
+    /// 規則：每一種身分都只能有一位（人類一位，四種動物各一隻）。
+    /// 出生點跟著目前的地圖走（MapRegistry）：人類在研究室，動物在各自的收容區（門會重新鎖上），烏龜在池塘裡。
     /// </summary>
     public class PlayerSpawner : MonoBehaviour
     {
@@ -181,7 +181,7 @@ namespace AnimalEscape.Players
 
         /// <summary>
         /// 主機端：把玩家換成指定的身分。Role.None 表示只收掉角色，讓玩家回到選身分畫面。
-        /// 被網住或被扛著的動物不能換身分（不然換一下就逃掉了）；force = true 時不管（換地圖時用）。
+        /// 被網住、被扛著、關在籠子裡的動物不能換身分（不然換一下就逃掉了）；force = true 時不管（換地圖時用）。
         /// </summary>
         public void AssignRole(PlayerSlot slot, Role role, bool force = false)
         {
@@ -192,14 +192,16 @@ namespace AnimalEscape.Players
 
             ulong clientId = slot.OwnerClientId;
 
+            // 被網住、被扛著、關在籠子裡都不能換身分（不然換一下就逃掉了）；出局了可以（重新出生）。
             PlayerAvatar current;
             if (!force && m_Avatars.TryGetValue(clientId, out current) && current != null && current.IsSpawned
-                && current.Capture != null && current.Capture.State.Value != CaptureState.Free)
+                && current.Capture != null && current.Capture.State.Value != CaptureState.Free
+                && current.Capture.State.Value != CaptureState.Out)
             {
                 return;
             }
 
-            if (role == Role.Human && IsHumanTakenByOther(slot))
+            if (role != Role.None && IsRoleTakenByOther(slot, role))
             {
                 slot.NotifyRoleDenied(role);
                 return;
@@ -221,14 +223,23 @@ namespace AnimalEscape.Players
             m_Avatars.Remove(clientId);
             slot.CurrentRole.Value = role;
 
+            // 還沒有「一局」的流程：每次重新出生，被關的次數歸零。
+            slot.TimesCaged.Value = 0;
+
             if (role == Role.None)
             {
                 return;
             }
 
+            // 動物每次出生都是關在自己的收容區裡，門要重新鎖上（烏龜的池塘沒有門，這一行對牠沒有作用）。
+            if (Roles.IsAnimal(role) && MatchState.Instance != null)
+            {
+                MatchState.Instance.ServerSetHabitatOpen(role, false);
+            }
+
             Vector3 position;
             Quaternion rotation;
-            GetSpawnPoint(role, slot.PlayerNumber, out position, out rotation);
+            GetSpawnPoint(role, out position, out rotation);
 
             GameObject instance = Instantiate(avatarPrefab, position, rotation);
             var avatar = instance.GetComponent<PlayerAvatar>();
@@ -245,12 +256,13 @@ namespace AnimalEscape.Players
             m_Avatars[clientId] = avatar;
         }
 
-        bool IsHumanTakenByOther(PlayerSlot requester)
+        /// <summary>這個身分是不是已經被別人選走了（每一種身分只能有一位）。</summary>
+        static bool IsRoleTakenByOther(PlayerSlot requester, Role role)
         {
             for (int i = 0; i < PlayerSlot.All.Count; i++)
             {
                 PlayerSlot other = PlayerSlot.All[i];
-                if (other != null && other != requester && other.CurrentRole.Value == Role.Human)
+                if (other != null && other != requester && other.CurrentRole.Value == role)
                 {
                     return true;
                 }
@@ -259,23 +271,10 @@ namespace AnimalEscape.Players
             return false;
         }
 
-        void GetSpawnPoint(Role role, int playerNumber, out Vector3 position, out Quaternion rotation)
+        static void GetSpawnPoint(Role role, out Vector3 position, out Quaternion rotation)
         {
-            Transform point = null;
             MapInfo map = MapRegistry.Instance != null ? MapRegistry.Instance.Active : null;
-            if (map != null)
-            {
-                if (role == Role.Human)
-                {
-                    point = map.humanSpawn;
-                }
-                else if (map.animalSpawns != null && map.animalSpawns.Length > 0)
-                {
-                    // 依玩家編號分配出生點，大家才不會疊在一起。
-                    point = map.animalSpawns[Mathf.Abs(playerNumber - 1) % map.animalSpawns.Length];
-                }
-            }
-
+            Transform point = map != null ? map.GetSpawn(role) : null;
             if (point != null)
             {
                 position = point.position;
@@ -283,6 +282,7 @@ namespace AnimalEscape.Players
             }
             else
             {
+                Debug.LogWarning("[PlayerSpawner] 這張地圖沒有設定 " + role + " 的出生點，先放在地圖正中央。請重建原型場景。");
                 position = new Vector3(0f, 0.05f, 0f);
                 rotation = Quaternion.identity;
             }

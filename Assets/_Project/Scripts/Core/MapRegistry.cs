@@ -15,8 +15,56 @@ namespace AnimalEscape.Core
         [Tooltip("這張地圖所有物件的根物件；同一時間只有一張地圖是開著的")]
         public GameObject root;
 
+        [Tooltip("人類的出生點（研究室裡）")]
         public Transform humanSpawn;
-        public Transform[] animalSpawns;
+
+        [Tooltip("每種動物在自己的收容區出生（烏龜在池塘裡）")]
+        public Transform rabbitSpawn;
+        public Transform monkeySpawn;
+        public Transform raccoonSpawn;
+        public Transform turtleSpawn;
+
+        /// <summary>這個身分的出生點；沒有設定就是 null。</summary>
+        public Transform GetSpawn(Role role)
+        {
+            switch (role)
+            {
+                case Role.Human:
+                    return humanSpawn;
+                case Role.Rabbit:
+                    return rabbitSpawn;
+                case Role.Monkey:
+                    return monkeySpawn;
+                case Role.Raccoon:
+                    return raccoonSpawn;
+                case Role.Turtle:
+                    return turtleSpawn;
+                default:
+                    return null;
+            }
+        }
+
+        public void SetSpawn(Role role, Transform point)
+        {
+            switch (role)
+            {
+                case Role.Human:
+                    humanSpawn = point;
+                    break;
+                case Role.Rabbit:
+                    rabbitSpawn = point;
+                    break;
+                case Role.Monkey:
+                    monkeySpawn = point;
+                    break;
+                case Role.Raccoon:
+                    raccoonSpawn = point;
+                    break;
+                case Role.Turtle:
+                    turtleSpawn = point;
+                    break;
+            }
+        }
     }
 
     /// <summary>

@@ -35,7 +35,13 @@ namespace AnimalEscape.Players
         /// </summary>
         public readonly NetworkVariable<int> Seat = new NetworkVariable<int>(0);
 
-        /// <summary>顯示用的玩家編號（P1、P2…），也用來決定動物的出生點。</summary>
+        /// <summary>
+        /// （動物）這一局被關進籠子幾次，決定下一次的倒數秒數（120／80／40），超過上限就出局。
+        /// 還沒有「一局」的流程，所以先在每次選身分（重新出生）時歸零。
+        /// </summary>
+        public readonly NetworkVariable<int> TimesCaged = new NetworkVariable<int>(0);
+
+        /// <summary>顯示用的玩家編號（P1、P2…）。</summary>
         public int PlayerNumber
         {
             get { return Seat.Value > 0 ? Seat.Value : (int)OwnerClientId + 1; }

@@ -41,6 +41,14 @@ namespace AnimalEscape.EditorTools
     ///     interact              （人類）扛起附近被網住的動物；已經扛著就是放下。和按 E 一樣
     ///     struggle [次數] [每秒幾下]
     ///                           （動物）連按掙脫，和連按空白鍵一樣；預設 1 下、每秒 8 下。掙脫了就提早結束
+    ///     pick [秒數上限]        （動物）按住撬鎖鍵，和按住 E 一樣；門開了、或超過上限（預設 20 秒）就放手，回報花了幾秒
+    ///     unlock 身分|all        （主機）直接把某一種動物的收容區打開；lock 身分|all 是重新鎖上
+    ///     rescue [秒數上限]      （動物）在關著隊友的籠子旁按住救援鍵，和按住 E 一樣；救出來、或超過上限（預設 15 秒）就放手
+    ///     cagetime 秒數 [籠號]   （主機）把籠子裡動物的倒數直接改成指定秒數（不給籠號就是全部），測出局用
+    ///     sounds                這個視窗的玩家「聽到」幾次腳步聲、鈴鐺、叫聲（上次 sounds 之後），和最近、最遠的距離；讀完歸零
+    ///     hold rescue|pick on|off
+    ///                           只按住／放開救援鍵或撬鎖鍵，不等結果（後面的指令照常執行），用來在進度條跑到一半時截圖
+    ///     spectate              （出局的玩家）換下一位隊友看，和按空白鍵一樣
     ///     teleport x y z [yaw]  把自己的角色直接放到指定位置
     ///     look yaw pitch [秒]   設定鏡頭方向；有給秒數就平順地轉過去
     ///     follow on|off         鏡頭自動轉向角色前進的方向
@@ -454,6 +462,83 @@ namespace AnimalEscape.EditorTools
                     StartStruggle(label, args);
                     break;
 
+                case "pick":
+                    StartPick(label, args);
+                    break;
+
+                case "rescue":
+                    StartRescue(label, args);
+                    break;
+
+                case "cagetime":
+                    SetCageTime(label, args);
+                    break;
+
+                case "sounds":
+                {
+                    var builder = new StringBuilder("聽到：");
+                    string[] names = { "腳步聲", "鈴鐺", "叫聲" };
+                    for (int i = 0; i < names.Length; i++)
+                    {
+                        SoundCues.Tally tally = SoundCues.TakeTally((SoundKind)i);
+                        builder.Append(i > 0 ? "｜" : "").Append(names[i]).Append(' ').Append(tally.Count).Append(" 次");
+                        if (tally.Count > 0)
+                        {
+                            builder.Append("（").Append(Format(tally.MinDistance)).Append("～").Append(Format(tally.MaxDistance)).Append(" 公尺）");
+                        }
+                    }
+
+                    Report(label, builder.ToString());
+                    break;
+                }
+
+                case "hold":
+                {
+                    PlayerAvatar avatar = LocalAvatar();
+                    string which = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+                    bool on = args.Length < 2 || args[1].ToLowerInvariant() != "off";
+                    if (avatar == null)
+                    {
+                        Report(label, "失敗：沒有自己的角色");
+                    }
+                    else if (which == "rescue")
+                    {
+                        avatar.GetComponent<PlayerRescue>().SetExternalHold(on);
+                        Report(label, "救援鍵" + (on ? "按住" : "放開"));
+                    }
+                    else if (which == "pick")
+                    {
+                        avatar.GetComponent<PlayerLockpick>().SetExternalHold(on);
+                        Report(label, "撬鎖鍵" + (on ? "按住" : "放開"));
+                    }
+                    else
+                    {
+                        Report(label, "失敗：要寫 hold rescue on|off 或 hold pick on|off");
+                    }
+
+                    break;
+                }
+
+                case "spectate":
+                {
+                    PlayerAvatar avatar = LocalAvatar();
+                    PlayerCapture capture = avatar != null ? avatar.Capture : null;
+                    if (capture == null || !capture.IsOut)
+                    {
+                        Report(label, "失敗：自己沒有出局");
+                        break;
+                    }
+
+                    capture.RequestNextSpectate();
+                    Report(label, "換人看");
+                    break;
+                }
+
+                case "unlock":
+                case "lock":
+                    SetHabitats(label, args, verb == "unlock");
+                    break;
+
                 case "look":
                     if (PlayerCamera.Instance != null)
                     {
@@ -642,6 +727,9 @@ namespace AnimalEscape.EditorTools
                 return;
             }
 
+            // 選身分一定會產生新的角色（就算和現在一樣），所以要等到「不是原本那個」的角色出現才算好；
+            // 不然選同一種身分時會看到舊角色就回報成功（2026-11-17 踩過：關在籠子裡被擋下來，卻回報成功）。
+            PlayerAvatar before = LocalAvatar();
             local.RequestRole(role);
 
             double deadline = EditorApplication.timeSinceStartup + 5.0;
@@ -652,7 +740,7 @@ namespace AnimalEscape.EditorTools
                 PlayerAvatar avatar = LocalAvatar();
                 bool ready = role == Role.None
                     ? avatar == null && local.CurrentRole.Value == Role.None
-                    : avatar != null && avatar.AvatarRole.Value == role && local.CurrentRole.Value == role;
+                    : avatar != null && avatar != before && avatar.AvatarRole.Value == role && local.CurrentRole.Value == role;
                 if (ready)
                 {
                     Report(label, role == Role.None ? "已回到選身分" : "身分=" + role + " " + DescribeAvatar(avatar));
@@ -1311,6 +1399,241 @@ namespace AnimalEscape.EditorTools
             };
         }
 
+        /// <summary>
+        /// 撬鎖：按住撬鎖鍵（和按住 E 走同一段程式），直到伸手構得到的那道門打開、或超過時間上限。
+        /// 回報從按下去到門打開實際花了幾秒。
+        /// </summary>
+        static void StartPick(string label, string[] args)
+        {
+            PlayerAvatar avatar = LocalAvatar();
+            PlayerLockpick lockpick = avatar != null ? avatar.GetComponent<PlayerLockpick>() : null;
+            if (lockpick == null)
+            {
+                Report(label, "失敗：沒有自己的角色");
+                return;
+            }
+
+            HabitatGate gate = lockpick.GateInReach;
+            if (gate == null)
+            {
+                HabitatGate own = HabitatGate.Find(avatar.AvatarRole.Value);
+                Report(label, "失敗：附近沒有鎖著的門可以撬（能不能撬=" + lockpick.CanPick
+                    + (own != null ? "，離自己收容區的門 " + Format(own.PlanarDistance(avatar.transform.position)) + " 公尺、門" + (own.IsOpen ? "開著" : "鎖著") : "")
+                    + "）" + DescribeAvatar(avatar));
+                return;
+            }
+
+            float limit = args.Length > 0 ? Mathf.Clamp(Number(args, 0), 0.1f, 60f) : 20f;
+            Role gateRole = gate.role;
+            double startedAt = EditorApplication.timeSinceStartup;
+            bool everStarted = false;
+            lockpick.SetExternalHold(true);
+
+            s_ActiveLabel = label;
+            s_Active = deltaTime =>
+            {
+                if (avatar == null || !avatar.IsSpawned || lockpick == null)
+                {
+                    Report(label, "失敗：角色不見了");
+                    return true;
+                }
+
+                double elapsed = EditorApplication.timeSinceStartup - startedAt;
+                everStarted |= lockpick.IsPicking;
+                if (gate == null || gate.IsOpen)
+                {
+                    lockpick.SetExternalHold(false);
+                    Report(label, "門開了：" + gateRole + " 的收容區，按了 " + Format((float)elapsed) + " 秒 " + DescribeAvatar(avatar));
+                    return true;
+                }
+
+                if (elapsed >= limit)
+                {
+                    lockpick.SetExternalHold(false);
+                    Report(label, "放手了（按了 " + Format((float)elapsed) + " 秒，門還鎖著；"
+                        + (everStarted ? "進度到 " + Format(lockpick.Progress) : "主機沒有開始計時") + "）" + DescribeAvatar(avatar));
+                    return true;
+                }
+
+                return false;
+            };
+        }
+
+        /// <summary>救援：按住救援鍵（和按住 E 走同一段程式），直到籠子裡的隊友被救出來、或超過時間上限。</summary>
+        static void StartRescue(string label, string[] args)
+        {
+            PlayerAvatar avatar = LocalAvatar();
+            PlayerRescue rescue = avatar != null ? avatar.GetComponent<PlayerRescue>() : null;
+            if (rescue == null)
+            {
+                Report(label, "失敗：沒有自己的角色");
+                return;
+            }
+
+            CaptureCage cage = rescue.CageInReach;
+            if (cage == null)
+            {
+                Report(label, "失敗：附近沒有關著隊友的籠子（能不能救=" + rescue.CanRescue + "）" + DescribeAvatar(avatar));
+                return;
+            }
+
+            PlayerCapture occupant = cage.Occupant;
+            int number = cage.number;
+            float limit = args.Length > 0 ? Mathf.Clamp(Number(args, 0), 0.1f, 60f) : 15f;
+            double startedAt = EditorApplication.timeSinceStartup;
+            bool everStarted = false;
+            rescue.SetExternalHold(true);
+
+            s_ActiveLabel = label;
+            s_Active = deltaTime =>
+            {
+                if (avatar == null || !avatar.IsSpawned)
+                {
+                    Report(label, "失敗：角色不見了");
+                    return true;
+                }
+
+                double elapsed = EditorApplication.timeSinceStartup - startedAt;
+                everStarted |= rescue.IsRescuing;
+                bool freed = occupant == null || !occupant.IsSpawned || occupant.State.Value != CaptureState.Caged;
+                if (freed)
+                {
+                    rescue.SetExternalHold(false);
+                    Report(label, "救出來了：" + number + " 號籠，按了 " + Format((float)elapsed) + " 秒"
+                        + (occupant != null && occupant.Avatar != null ? "｜被救的 P" + occupant.Avatar.PlayerNumber + " " + DescribeAvatar(occupant.Avatar) : ""));
+                    return true;
+                }
+
+                if (elapsed >= limit)
+                {
+                    rescue.SetExternalHold(false);
+                    Report(label, "放手了（按了 " + Format((float)elapsed) + " 秒，還沒救出來；"
+                        + (everStarted ? "進度到 " + Format(rescue.Progress) : "主機沒有開始計時") + "）" + DescribeAvatar(avatar));
+                    return true;
+                }
+
+                return false;
+            };
+        }
+
+        /// <summary>（主機）直接改籠子裡動物的倒數秒數。</summary>
+        static void SetCageTime(string label, string[] args)
+        {
+            MatchState match = MatchState.Instance;
+            if (match == null || !match.IsServer)
+            {
+                Report(label, "失敗：要在開了房間的主機上下這個指令");
+                return;
+            }
+
+            float seconds = Number(args, 0);
+            int only = args.Length > 1 ? Mathf.RoundToInt(Number(args, 1)) : 0;
+            int changed = 0;
+            for (int i = 0; i < PlayerAvatar.All.Count; i++)
+            {
+                PlayerAvatar avatar = PlayerAvatar.All[i];
+                PlayerCapture capture = avatar != null ? avatar.Capture : null;
+                if (capture != null && capture.State.Value == CaptureState.Caged && (only == 0 || capture.CageNumber.Value == only))
+                {
+                    capture.ServerSetCageTime(seconds);
+                    changed++;
+                }
+            }
+
+            Report(label, "改了 " + changed + " 隻的倒數 → " + Format(seconds) + " 秒");
+        }
+
+        /// <summary>目前這張地圖上每個捕捉籠：關著誰、倒數、暫停。</summary>
+        static string DescribeCages()
+        {
+            var builder = new StringBuilder("捕捉籠：");
+            if (CaptureCage.Active.Count == 0)
+            {
+                return builder.Append("（這張地圖沒有）").ToString();
+            }
+
+            bool any = false;
+            for (int number = 1; number <= 9; number++)
+            {
+                CaptureCage cage = CaptureCage.Find(number);
+                if (cage == null)
+                {
+                    continue;
+                }
+
+                PlayerCapture occupant = cage.Occupant;
+                builder.Append(any ? "、" : "").Append(number).Append('=');
+                any = true;
+                if (occupant == null || occupant.Avatar == null)
+                {
+                    builder.Append("空");
+                }
+                else
+                {
+                    builder.Append('P').Append(occupant.Avatar.PlayerNumber).Append(' ')
+                        .Append(Format(occupant.CageTimeLeft.Value)).Append("s")
+                        .Append(occupant.CagePaused.Value ? "（暫停）" : "");
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>（主機）直接打開或鎖上收容區，不用撬。</summary>
+        static void SetHabitats(string label, string[] args, bool open)
+        {
+            MatchState match = MatchState.Instance;
+            if (match == null || !match.IsServer)
+            {
+                Report(label, "失敗：要在開了房間的主機上下這個指令");
+                return;
+            }
+
+            string which = args.Length > 0 ? args[0].ToLowerInvariant() : "all";
+            if (which == "all")
+            {
+                for (int i = 0; i < Roles.Selectable.Length; i++)
+                {
+                    match.ServerSetHabitatOpen(Roles.Selectable[i], open);
+                }
+            }
+            else
+            {
+                Role role;
+                if (!Enum.TryParse(which, true, out role) || role == Role.None)
+                {
+                    Report(label, "失敗：要寫 Rabbit、Monkey、Raccoon、Turtle 或 all");
+                    return;
+                }
+
+                match.ServerSetHabitatOpen(role, open);
+            }
+
+            Report(label, DescribeHabitats());
+        }
+
+        /// <summary>目前這張地圖上每個收容區的門是開著還是鎖著。</summary>
+        static string DescribeHabitats()
+        {
+            var builder = new StringBuilder("收容區：");
+            if (HabitatGate.Active.Count == 0)
+            {
+                return builder.Append("（這張地圖沒有）").ToString();
+            }
+
+            for (int i = 0; i < HabitatGate.Active.Count; i++)
+            {
+                HabitatGate gate = HabitatGate.Active[i];
+                if (gate != null)
+                {
+                    builder.Append(i > 0 ? "、" : "").Append(gate.role).Append(gate.IsOpen ? "=開" : "=鎖")
+                        .Append("（門在 ").Append(Format(gate.transform.position)).Append("）");
+                }
+            }
+
+            return builder.ToString();
+        }
+
         static void StartWait(string label, float seconds)
         {
             double until = EditorApplication.timeSinceStartup + Mathf.Clamp(seconds, 0f, 60f);
@@ -1349,6 +1672,12 @@ namespace AnimalEscape.EditorTools
 
             builder.Append("｜視角：人類=").Append(GameConfig.Instance.humanViewMode)
                 .Append(" 動物=").Append(GameConfig.Instance.animalViewMode);
+            if (EditorApplication.isPlaying)
+            {
+                builder.Append("｜").Append(DescribeHabitats());
+                builder.Append("｜").Append(DescribeCages());
+            }
+
             builder.Append("｜玩家數=").Append(PlayerSlot.All.Count);
             for (int i = 0; i < PlayerSlot.All.Count; i++)
             {
@@ -1375,7 +1704,8 @@ namespace AnimalEscape.EditorTools
                 // 別人的名牌現在在我的畫面上會不會顯示（和遊戲介面用的是同一個判斷）
                 if (!avatar.IsOwner && playerCamera != null && playerCamera.Camera != null)
                 {
-                    builder.Append(GameHud.IsNameTagVisible(playerCamera.Camera, avatar) ? " 名牌=顯示" : " 名牌=不顯示");
+                    bool outOfPlay = avatar.Capture != null && avatar.Capture.IsOut;
+                    builder.Append(!outOfPlay && GameHud.IsNameTagVisible(playerCamera.Camera, avatar) ? " 名牌=顯示" : " 名牌=不顯示");
                 }
             }
 
@@ -1445,7 +1775,63 @@ namespace AnimalEscape.EditorTools
                 + " 身高=" + Format(controller.height)
                 + " 半徑=" + Format(controller.radius)
                 + (avatar.IsBodyHidden ? " 身體隱藏" : "")
+                + DescribeWaterAndLock(avatar)
+                + DescribeSpeed(avatar)
                 + DescribeCapture(avatar.Capture);
+        }
+
+        /// <summary>這個視窗量到的移動速度（聲音系統用它判斷跑或慢走）。</summary>
+        static string DescribeSpeed(PlayerAvatar avatar)
+        {
+            var sounds = avatar.GetComponent<PlayerSounds>();
+            return sounds != null && sounds.MeasuredSpeed > 0.3f ? " 速度=" + Format(sounds.MeasuredSpeed) : "";
+        }
+
+        /// <summary>在不在水裡（外觀沉了多少、圖層）、是不是關在收容區裡、撬鎖的進度。</summary>
+        static string DescribeWaterAndLock(PlayerAvatar avatar)
+        {
+            var builder = new StringBuilder();
+            if (avatar.InWater)
+            {
+                builder.Append(" 在水裡（沉 ").Append(Format(avatar.Sink)).Append("）");
+            }
+
+            if (avatar.gameObject.layer != 0)
+            {
+                builder.Append(" 圖層=").Append(avatar.gameObject.layer == GameLayers.Swimmer ? "會游泳" : avatar.gameObject.layer.ToString());
+            }
+
+            var movement = avatar.GetComponent<PlayerMovement>();
+            if (movement != null && movement.IsStranded)
+            {
+                builder.Append(" 掉進水裡正在爬上岸");
+            }
+
+            HabitatGate own = HabitatGate.Find(avatar.AvatarRole.Value);
+            if (own != null && !own.IsOpen && own.Contains(avatar.transform.position))
+            {
+                builder.Append(" 關在收容區裡");
+            }
+
+            var lockpick = avatar.GetComponent<PlayerLockpick>();
+            if (lockpick != null && lockpick.IsPicking)
+            {
+                builder.Append(" 撬鎖中=").Append(lockpick.Target.Value).Append(' ').Append(Format(lockpick.Progress));
+            }
+
+            var rescue = avatar.GetComponent<PlayerRescue>();
+            if (rescue != null && rescue.IsRescuing)
+            {
+                builder.Append(" 救援中=").Append(rescue.TargetCage.Value).Append("號籠 ").Append(Format(rescue.Progress));
+            }
+
+            PlayerSlot slot = PlayerSlot.FindByClient(avatar.OwnerClientId);
+            if (slot != null && slot.TimesCaged.Value > 0)
+            {
+                builder.Append(" 被關過=").Append(slot.TimesCaged.Value).Append("次");
+            }
+
+            return builder.ToString();
         }
 
         /// <summary>追與抓的狀態：被網住、被誰扛、扛著誰、保護、踉蹌、網子冷卻、上次揮網的結果。</summary>
@@ -1457,9 +1843,27 @@ namespace AnimalEscape.EditorTools
             }
 
             var builder = new StringBuilder();
-            if (capture.State.Value != CaptureState.Free)
+            if (capture.IsHeld)
             {
                 builder.Append(" 狀態=").Append(capture.State.Value).Append(" 掙脫=").Append(Format(capture.Struggle.Value));
+            }
+            else if (capture.State.Value == CaptureState.Caged)
+            {
+                builder.Append(" 狀態=Caged ").Append(capture.CageNumber.Value).Append("號籠 剩=").Append(Format(capture.CageTimeLeft.Value)).Append("s")
+                    .Append(capture.CagePaused.Value ? "（暫停）" : "");
+            }
+            else if (capture.State.Value == CaptureState.Out)
+            {
+                builder.Append(" 狀態=Out");
+                if (capture == PlayerCapture.Local)
+                {
+                    builder.Append(capture.Spectating != null ? " 看P" + capture.Spectating.PlayerNumber : " 看全圖");
+                }
+            }
+
+            if (capture.IsSlowed)
+            {
+                builder.Append(" 變慢中");
             }
 
             PlayerCapture carrier = capture.Carrier;

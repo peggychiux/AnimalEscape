@@ -8,7 +8,7 @@ namespace AnimalEscape.UI
 {
     /// <summary>
     /// 進房間之後的介面：左上角的資訊面板、選身分的畫面、其他玩家頭上的名牌，
-    /// 以及追與抓的提示（網子冷卻、扛起、掙脫進度…）。
+    /// 追與抓的提示（網子冷卻、扛起、掙脫進度…）、撬鎖，以及捕捉籠（籠子上的倒數、右上角的籠子列表、救援進度、出局觀戰）。
     /// </summary>
     public class GameHud : MonoBehaviour
     {
@@ -17,6 +17,11 @@ namespace AnimalEscape.UI
 
         static readonly Color k_BarStruggle = new Color(1f, 0.78f, 0.25f);
         static readonly Color k_BarCooldown = new Color(0.45f, 0.75f, 0.95f);
+        static readonly Color k_BarLockpick = new Color(0.98f, 0.85f, 0.30f);
+        static readonly Color k_BarRescue = new Color(0.45f, 0.90f, 0.55f);
+        static readonly Color k_BarCage = new Color(0.95f, 0.45f, 0.40f);
+
+        const float k_EmptyCageLabelDistance = 22f;
 
         void OnGUI()
         {
@@ -33,6 +38,11 @@ namespace AnimalEscape.UI
             PlayerSlot local = PlayerSlot.Local;
             bool choosing = local != null && local.CurrentRole.Value == Role.None;
 
+            if (!choosing)
+            {
+                DrawCageLabels(scale);
+            }
+
             DrawNameTags(scale);
             if (!choosing && PlayerCamera.Instance != null && PlayerCamera.Instance.IsFirstPerson)
             {
@@ -41,7 +51,9 @@ namespace AnimalEscape.UI
 
             if (!choosing)
             {
+                DrawSoundCues(width, height);
                 DrawCaptureHud(width, height);
+                DrawCageList(width);
             }
 
             Rect info = DrawInfoPanel(connection, local, choosing);
@@ -116,7 +128,10 @@ namespace AnimalEscape.UI
             if (carried != null)
             {
                 GUI.Label(line1, "扛著 " + NameOf(carried) + "（走得比較慢，不能揮網）", UiKit.Center);
-                GUI.Label(line2, "E 放下｜下面是牠的掙脫進度", UiKit.Tag);
+                CaptureCage cage = mine.CageInReach;
+                GUI.Label(line2, cage != null
+                    ? "按 E 關進 " + cage.number + " 號籠！｜下面是牠的掙脫進度"
+                    : "走到空籠子旁按 E 關進去（不在籠子旁按 E 是放下）", UiKit.Tag);
                 UiKit.Bar(bar, carried.Struggle.Value, k_BarStruggle);
                 return;
             }
@@ -129,6 +144,10 @@ namespace AnimalEscape.UI
             else if (cooldown > 0f)
             {
                 GUI.Label(line1, "網子冷卻中 " + cooldown.ToString("0.0") + " 秒", UiKit.Center);
+            }
+            else if (mine.Avatar != null && mine.Avatar.InWater)
+            {
+                GUI.Label(line1, "涉水中，走得比較慢｜滑鼠左鍵揮網", UiKit.Center);
             }
             else
             {
@@ -149,7 +168,7 @@ namespace AnimalEscape.UI
                         GUI.Label(line2, "網住了 " + NameOf(mine.LastSwingTarget) + "！", UiKit.Tag);
                         break;
                     case SwingOutcome.Protected:
-                        GUI.Label(line2, "牠剛掙脫，暫時抓不到", UiKit.Tag);
+                        GUI.Label(line2, "牠在保護中抓不到，只拖慢了一下", UiKit.Tag);
                         break;
                     case SwingOutcome.Miss:
                         GUI.Label(line2, "揮空了", UiKit.Tag);
@@ -164,6 +183,43 @@ namespace AnimalEscape.UI
         static void DrawAnimalCaptureHud(PlayerCapture mine, float width, float height)
         {
             CaptureState state = mine.State.Value;
+            if (state == CaptureState.Out)
+            {
+                var panel = new Rect((width - 460f) * 0.5f, height - 130f, 460f, 84f);
+                UiKit.Panel(panel);
+                GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 34f), "你出局了", UiKit.Title);
+                PlayerAvatar watching = mine.Spectating;
+                GUI.Label(new Rect(panel.x, panel.y + 46f, panel.width, 26f), watching != null
+                    ? "正在看 P" + watching.PlayerNumber + " " + watching.Settings.displayName + "｜空白鍵換人看"
+                    : "沒有隊友在場上了｜可以按左上角的「換身分」重新開始", UiKit.Center);
+                return;
+            }
+
+            if (state == CaptureState.Caged)
+            {
+                GameConfig config = GameConfig.Instance;
+                PlayerSlot slot = PlayerSlot.FindByClient(mine.OwnerClientId);
+                int times = slot != null ? slot.TimesCaged.Value : 1;
+                float total = Mathf.Max(1f, config.GetCageSeconds(times));
+                var panel = new Rect((width - 480f) * 0.5f, height - 176f, 480f, 124f);
+                UiKit.Panel(panel);
+                GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 34f),
+                    "關在 " + mine.CageNumber.Value + " 號籠（第 " + times + " 次）", UiKit.Title);
+                string detail = mine.CagePaused.Value
+                    ? "人類守在旁邊太久，倒數暫停中｜等隊友來救"
+                    : "倒數歸零就出局｜等隊友來救（隊友在籠子旁按住 E）";
+                GUI.Label(new Rect(panel.x, panel.y + 44f, panel.width, 24f), detail, UiKit.Center);
+                if (times >= config.MaxTimesCaged)
+                {
+                    GUI.Label(new Rect(panel.x, panel.y + 66f, panel.width, 22f), "這是最後一次：再被抓就直接出局", UiKit.Tag);
+                }
+
+                var bar = new Rect(panel.x + 20f, panel.y + 92f, panel.width - 40f, 20f);
+                UiKit.Bar(bar, mine.CageTimeLeft.Value / total, k_BarCage);
+                GUI.Label(bar, Mathf.CeilToInt(mine.CageTimeLeft.Value) + " 秒", UiKit.Tag);
+                return;
+            }
+
             if (state != CaptureState.Free)
             {
                 var panel = new Rect((width - 460f) * 0.5f, height - 170f, 460f, 118f);
@@ -178,14 +234,79 @@ namespace AnimalEscape.UI
                 return;
             }
 
-            string message = null;
-            if (mine.IsProtected)
+            // 救援：正在救就顯示進度條；站在關著隊友的籠子旁就提示可以救。（比撬鎖優先）
+            PlayerRescue rescue = PlayerRescue.Local;
+            if (rescue != null && rescue.IsSpawned)
             {
-                message = "剛掙脫：" + mine.ProtectionRemaining.ToString("0.0") + " 秒內網子抓不到你，快跑！";
+                CaptureCage target = rescue.IsRescuing ? CaptureCage.Find(rescue.TargetCage.Value) : rescue.CageInReach;
+                PlayerCapture occupant = target != null ? target.Occupant : null;
+                if (rescue.IsRescuing)
+                {
+                    var panel = new Rect((width - 460f) * 0.5f, height - 150f, 460f, 98f);
+                    UiKit.Panel(panel);
+                    float remaining = rescue.Duration * (1f - rescue.Progress);
+                    GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 30f), "救 " + NameOf(occupant) + "… 還要 " + remaining.ToString("0.0") + " 秒", UiKit.Title);
+                    GUI.Label(new Rect(panel.x, panel.y + 40f, panel.width, 22f), "按住 E 不要放，也不要走開", UiKit.Tag);
+                    UiKit.Bar(new Rect(panel.x + 20f, panel.y + 68f, panel.width - 40f, 18f), rescue.Progress, k_BarRescue);
+                    return;
+                }
+
+                if (target != null)
+                {
+                    var panel = new Rect((width - 460f) * 0.5f, height - 84f, 460f, 40f);
+                    UiKit.Panel(panel);
+                    GUI.Label(panel, "按住 E 把 " + NameOf(occupant) + " 救出來（要 " + rescue.Duration.ToString("0.#") + " 秒）", UiKit.Center);
+                    return;
+                }
+            }
+
+            // 撬鎖：正在撬就顯示進度條；站在鎖著的門邊就提示可以撬。
+            PlayerLockpick lockpick = PlayerLockpick.Local;
+            if (lockpick != null && lockpick.IsSpawned)
+            {
+                if (lockpick.IsPicking)
+                {
+                    var panel = new Rect((width - 460f) * 0.5f, height - 150f, 460f, 98f);
+                    UiKit.Panel(panel);
+                    float remaining = lockpick.Duration * (1f - lockpick.Progress);
+                    GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 30f), "撬鎖中… 還要 " + remaining.ToString("0.0") + " 秒", UiKit.Title);
+                    GUI.Label(new Rect(panel.x, panel.y + 40f, panel.width, 22f), "按住 E 不要放，也不要走開", UiKit.Tag);
+                    UiKit.Bar(new Rect(panel.x + 20f, panel.y + 68f, panel.width - 40f, 18f), lockpick.Progress, k_BarLockpick);
+                    return;
+                }
+
+                HabitatGate gate = lockpick.GateInReach;
+                if (gate != null)
+                {
+                    var panel = new Rect((width - 460f) * 0.5f, height - 84f, 460f, 40f);
+                    UiKit.Panel(panel);
+                    GUI.Label(panel, "按住 E 撬鎖（要 " + lockpick.Duration.ToString("0") + " 秒）", UiKit.Center);
+                    return;
+                }
+            }
+
+            string message = null;
+            if (mine.IsSlowed)
+            {
+                message = "被網子擦到了，變慢一下！";
+            }
+            else if (mine.IsProtected)
+            {
+                message = "保護中：" + mine.ProtectionRemaining.ToString("0.0") + " 秒內網子抓不到你，快跑！";
+            }
+            else if (IsLockedInHabitat(mine))
+            {
+                message = "你被關在收容區裡！走到黃色的門邊，按住 E 撬鎖";
             }
             else if (IsTeammateBeingCarried(mine))
             {
                 message = "隊友被扛走了！全速撞上人類可以把牠救下來";
+            }
+            else if (mine.Avatar != null && mine.Avatar.InWater)
+            {
+                message = GameConfig.Instance.CanEnterWater(mine.Avatar.AvatarRole.Value)
+                    ? "在水裡游得比走路快；人類下水會變慢"
+                    : "掉進水裡了！快爬上岸";
             }
 
             if (message != null)
@@ -194,6 +315,18 @@ namespace AnimalEscape.UI
                 UiKit.Panel(panel);
                 GUI.Label(panel, message, UiKit.Center);
             }
+        }
+
+        /// <summary>這隻動物是不是還關在自己的收容區裡（門還沒被撬開）。</summary>
+        static bool IsLockedInHabitat(PlayerCapture mine)
+        {
+            if (mine.Avatar == null)
+            {
+                return false;
+            }
+
+            HabitatGate gate = HabitatGate.Find(mine.Avatar.AvatarRole.Value);
+            return gate != null && !gate.IsOpen && gate.Contains(mine.transform.position);
         }
 
         static bool IsTeammateBeingCarried(PlayerCapture mine)
@@ -226,7 +359,8 @@ namespace AnimalEscape.UI
             bool hasMap = registry != null && registry.Active != null;
             bool canChangeMap = isHost && match != null && registry != null && registry.Count > 1;
 
-            float panelHeight = 172f + playerCount * 22f + (hasCode ? 34f : 0f) + (choosing ? 0f : 72f)
+            bool isAnimal = !choosing && local != null && Roles.IsAnimal(local.CurrentRole.Value);
+            float panelHeight = 172f + playerCount * 22f + (hasCode ? 34f : 0f) + (choosing ? 0f : 72f) + (isAnimal ? 44f : 0f)
                 + (hasMap ? 24f : 0f) + (canChangeMap ? 36f : 0f);
             var panel = new Rect(12f, 12f, 300f, panelHeight);
 
@@ -272,8 +406,13 @@ namespace AnimalEscape.UI
             if (!choosing && local != null)
             {
                 GUILayout.Label(local.CurrentRole.Value == Role.Human
-                    ? "滑鼠左鍵揮網　E 扛起／放下"
+                    ? "滑鼠左鍵揮網　E 扛起／放下／關進籠子"
                     : "被網住或被扛著：連按空白鍵掙脫", UiKit.Hint);
+                if (isAnimal)
+                {
+                    GUILayout.Label("在鎖住的門邊：按住 E 撬鎖", UiKit.Hint);
+                    GUILayout.Label("在關著隊友的籠子旁：按住 E 救人", UiKit.Hint);
+                }
             }
 
             bool locked = Cursor.lockState == CursorLockMode.Locked;
@@ -282,9 +421,9 @@ namespace AnimalEscape.UI
             GUILayout.FlexibleSpace();
             if (!choosing && local != null)
             {
-                // 被網住或被扛著的時候不能換身分（主機也會擋），不然換一下就逃掉了。
+                // 被網住、被扛著、關在籠子裡的時候不能換身分（主機也會擋），不然換一下就逃掉了。出局了可以。
                 PlayerCapture mine = PlayerCapture.Local;
-                bool captured = mine != null && mine.State.Value != CaptureState.Free;
+                bool captured = mine != null && mine.State.Value != CaptureState.Free && mine.State.Value != CaptureState.Out;
                 GUI.enabled = !captured;
                 if (GUILayout.Button(captured ? "換身分（被抓住時不能換）" : "換身分", UiKit.Button, GUILayout.Height(30f)))
                 {
@@ -333,17 +472,16 @@ namespace AnimalEscape.UI
             }
             else
             {
-                GUILayout.Label("人類只能有一位，負責抓動物；動物可以重複選。", UiKit.Hint);
+                GUILayout.Label("每種身分只能有一位。人類從研究室出發；動物開場關在自己的收容區。", UiKit.Hint);
             }
 
             GUILayout.Space(6f);
-            bool humanTaken = IsHumanTakenByOther(local);
 
             for (int i = 0; i < Roles.Selectable.Length; i++)
             {
                 Role role = Roles.Selectable[i];
                 RoleSettings settings = GameConfig.Instance.GetRole(role);
-                bool unavailable = role == Role.Human && humanTaken;
+                bool unavailable = IsRoleTakenByOther(local, role);
 
                 string label = settings.displayName
                                + "　身高 " + settings.height.ToString("0.0") + " m"
@@ -364,12 +502,223 @@ namespace AnimalEscape.UI
             GUILayout.EndArea();
         }
 
-        static bool IsHumanTakenByOther(PlayerSlot local)
+        static bool IsRoleTakenByOther(PlayerSlot local, Role role)
         {
             for (int i = 0; i < PlayerSlot.All.Count; i++)
             {
                 PlayerSlot other = PlayerSlot.All[i];
-                if (other != null && other != local && other.CurrentRole.Value == Role.Human)
+                if (other != null && other != local && other.CurrentRole.Value == role)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // ------------------------------------------------------------------
+        // 聲音提示（畫面邊緣）
+        // ------------------------------------------------------------------
+
+        static readonly Color k_FootstepColor = new Color(1f, 0.58f, 0.22f);
+        static readonly Color k_BellColor = new Color(1f, 0.9f, 0.32f);
+        static readonly Color k_CryColor = new Color(1f, 0.32f, 0.3f);
+
+        /// <summary>
+        /// 剛聽到的聲音，在畫面邊緣顯示一個聲波圖示，指出大概的方向（以鏡頭為準）；越近越大，幾秒後淡掉。
+        /// 只給方向和遠近（大、中、小三種），不給確切位置或距離數字。
+        /// </summary>
+        static void DrawSoundCues(float width, float height)
+        {
+            if (Event.current.type != EventType.Repaint || SoundCues.Recent.Count == 0)
+            {
+                return;
+            }
+
+            PlayerCamera playerCamera = PlayerCamera.Instance;
+            if (playerCamera == null || playerCamera.Camera == null)
+            {
+                return;
+            }
+
+            float duration = Mathf.Max(0.1f, GameConfig.Instance.soundCueSeconds);
+            Transform view = playerCamera.Camera.transform;
+            Vector3 forward = view.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                forward = view.up;
+                forward.y = 0f;
+            }
+
+            forward.Normalize();
+            var center = new Vector2(width * 0.5f, height * 0.5f);
+            float radiusX = width * 0.4f;
+            float radiusY = height * 0.36f;
+            Matrix4x4 matrix = GUI.matrix;
+            Color previous = GUI.color;
+            float now = Time.unscaledTime;
+
+            for (int i = 0; i < SoundCues.Recent.Count; i++)
+            {
+                SoundCues.Cue cue = SoundCues.Recent[i];
+                float age = now - cue.Time;
+                if (age > duration)
+                {
+                    continue;
+                }
+
+                Vector3 toSound = cue.Position - view.position;
+                toSound.y = 0f;
+                float angle = toSound.sqrMagnitude < 0.01f ? 0f : Vector3.SignedAngle(forward, toSound, Vector3.up);
+                float radians = angle * Mathf.Deg2Rad;
+                var position = new Vector2(center.x + Mathf.Sin(radians) * radiusX, center.y - Mathf.Cos(radians) * radiusY);
+
+                // 遠近只分三種大小
+                float size = cue.Loudness > 0.66f ? 84f : (cue.Loudness > 0.33f ? 64f : 46f);
+                Color color = cue.Kind == SoundKind.Footstep ? k_FootstepColor : (cue.Kind == SoundKind.Bell ? k_BellColor : k_CryColor);
+                color.a = Mathf.Clamp01(1f - age / duration) * 0.95f;
+                GUI.color = color;
+
+                GUI.matrix = matrix;
+                GUIUtility.RotateAroundPivot(angle, position);
+                GUI.DrawTexture(new Rect(position.x - size * 0.5f, position.y - size * 0.5f, size, size), SoundCueIcon.Texture);
+                GUI.matrix = matrix;
+
+                string label = cue.Kind == SoundKind.Footstep ? "腳步聲" : (cue.Kind == SoundKind.Bell ? "鈴鐺" : "叫聲！");
+                GUI.color = new Color(1f, 1f, 1f, color.a);
+                GUI.Label(new Rect(position.x - 50f, position.y + size * 0.5f - 4f, 100f, 22f), label, UiKit.Tag);
+            }
+
+            GUI.matrix = matrix;
+            GUI.color = previous;
+        }
+
+        // ------------------------------------------------------------------
+        // 捕捉籠：籠子上方的標籤、右上角的列表
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 籠子上方的標籤。關著動物的籠子一律顯示（誰被關在哪裡是公開的，隊友才找得到）；
+        /// 空籠子只在附近、而且看得到的時候顯示編號。
+        /// </summary>
+        static void DrawCageLabels(float scale)
+        {
+            if (Event.current.type != EventType.Repaint)
+            {
+                return;
+            }
+
+            PlayerCamera playerCamera = PlayerCamera.Instance;
+            if (playerCamera == null || playerCamera.Camera == null)
+            {
+                return;
+            }
+
+            Camera camera = playerCamera.Camera;
+            Vector3 eye = camera.transform.position;
+            for (int i = 0; i < CaptureCage.Active.Count; i++)
+            {
+                CaptureCage cage = CaptureCage.Active[i];
+                if (cage == null)
+                {
+                    continue;
+                }
+
+                Vector3 world = cage.transform.position + Vector3.up * 2.2f;
+                PlayerCapture occupant = cage.Occupant;
+                if (occupant == null)
+                {
+                    float distance = (world - eye).magnitude;
+                    if (distance > k_EmptyCageLabelDistance || !CanSee(eye, world))
+                    {
+                        continue;
+                    }
+                }
+
+                Vector3 screen = camera.WorldToScreenPoint(world);
+                if (screen.z <= 0f)
+                {
+                    continue;
+                }
+
+                float x = screen.x / scale;
+                float y = (Screen.height - screen.y) / scale;
+                string label = cage.number + " 號籠";
+                float tagWidth = 80f;
+                if (occupant != null)
+                {
+                    label += "｜" + NameOf(occupant) + "｜" + Mathf.CeilToInt(occupant.CageTimeLeft.Value) + " 秒"
+                        + (occupant.CagePaused.Value ? "（暫停中）" : "");
+                    tagWidth = occupant.CagePaused.Value ? 290f : 220f;
+                }
+
+                var rect = new Rect(x - tagWidth * 0.5f, y - 11f, tagWidth, 22f);
+                UiKit.Panel(rect);
+                GUI.Label(rect, label, UiKit.Tag);
+            }
+        }
+
+        /// <summary>
+        /// 右上角：目前關著動物的籠子、倒數、是不是暫停中。
+        /// 動物另外看得到「籠邊警報」：人類進到那個籠子附近（GameConfig.cageAlarmRadius）就標出來。
+        /// </summary>
+        static void DrawCageList(float width)
+        {
+            PlayerCapture mine = PlayerCapture.Local;
+            bool showAlarm = mine != null && !mine.IsHuman;
+            GameConfig config = GameConfig.Instance;
+
+            int count = 0;
+            for (int i = 0; i < CaptureCage.Active.Count; i++)
+            {
+                if (CaptureCage.Active[i] != null && !CaptureCage.Active[i].IsEmpty)
+                {
+                    count++;
+                }
+            }
+
+            if (count == 0)
+            {
+                return;
+            }
+
+            var panel = new Rect(width - 392f, 12f, 380f, 40f + count * 24f);
+            UiKit.Panel(panel);
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 6f, panel.width - 24f, 26f), "捕捉籠", UiKit.Header);
+            float y = panel.y + 34f;
+            for (int number = 1; number <= 9; number++)
+            {
+                CaptureCage cage = CaptureCage.Find(number);
+                PlayerCapture occupant = cage != null ? cage.Occupant : null;
+                if (occupant == null)
+                {
+                    continue;
+                }
+
+                string line = number + " 號籠　" + NameOf(occupant) + "　" + Mathf.CeilToInt(occupant.CageTimeLeft.Value) + " 秒";
+                if (occupant.CagePaused.Value)
+                {
+                    line += "｜暫停中";
+                }
+
+                if (showAlarm && IsHumanNear(cage, config.cageAlarmRadius))
+                {
+                    line += "｜人類在附近！";
+                }
+
+                GUI.Label(new Rect(panel.x + 12f, y, panel.width - 24f, 22f), line, UiKit.Hint);
+                y += 24f;
+            }
+        }
+
+        static bool IsHumanNear(CaptureCage cage, float radius)
+        {
+            for (int i = 0; i < PlayerAvatar.All.Count; i++)
+            {
+                PlayerAvatar avatar = PlayerAvatar.All[i];
+                if (avatar != null && avatar.IsSpawned && avatar.AvatarRole.Value == Role.Human
+                    && cage.PlanarDistance(avatar.transform.position) <= radius)
                 {
                     return true;
                 }
@@ -399,7 +748,8 @@ namespace AnimalEscape.UI
             for (int i = 0; i < PlayerAvatar.All.Count; i++)
             {
                 PlayerAvatar avatar = PlayerAvatar.All[i];
-                if (avatar == null || !avatar.IsSpawned || avatar.IsOwner)
+                if (avatar == null || !avatar.IsSpawned || avatar.IsOwner
+                    || (avatar.Capture != null && avatar.Capture.State.Value == CaptureState.Out))
                 {
                     continue;
                 }
@@ -433,6 +783,10 @@ namespace AnimalEscape.UI
                     else if (capture.State.Value == CaptureState.Carried)
                     {
                         note = "被扛著";
+                    }
+                    else if (capture.State.Value == CaptureState.Caged)
+                    {
+                        note = "在 " + capture.CageNumber.Value + " 號籠";
                     }
                     else if (capture.IsProtected)
                     {

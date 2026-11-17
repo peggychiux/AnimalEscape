@@ -234,7 +234,9 @@ namespace AnimalEscape.Players
                     m_TargetAvatar.SetBodyHidden(true);
                 }
 
-                transform.SetPositionAndRotation(m_Target.position + Vector3.up * m_EyeHeight, rotation);
+                // 涉水時身體往下沉了一截，眼睛的高度跟著低一點（走進水裡看得出來）。
+                float eyeHeight = m_EyeHeight - (m_TargetAvatar != null ? m_TargetAvatar.Sink : 0f);
+                transform.SetPositionAndRotation(m_Target.position + Vector3.up * eyeHeight, rotation);
                 return;
             }
 

@@ -166,6 +166,103 @@ namespace AnimalEscape.Core
         [Tooltip("人類踉蹌時的速度倍率")]
         [Range(0f, 1f)] public float staggerSpeedMultiplier = 0.3f;
 
+        [Header("水（倍率＝在水裡的速度 ÷ 平常的速度；0 表示不能下水，會被水邊擋住）")]
+        [Tooltip("人類涉水時的速度倍率（變慢）")]
+        public float humanWaterSpeedMultiplier = 0.5f;
+
+        [Tooltip("烏龜在水裡的速度倍率（游得比走路快）")]
+        public float turtleWaterSpeedMultiplier = 1.6f;
+
+        public float rabbitWaterSpeedMultiplier = 0f;
+        public float monkeyWaterSpeedMultiplier = 0f;
+        public float raccoonWaterSpeedMultiplier = 0f;
+
+        [Tooltip("不會游泳的動物萬一人在水裡（例如在水中央從人類肩上掙脫、附近又沒有岸可以落地），爬上岸時的速度倍率")]
+        [Range(0.1f, 1f)] public float strandedWaterSpeedMultiplier = 0.5f;
+
+        [Tooltip("在水裡時，角色的外觀往下沉多少（公尺），看起來像泡在水裡。最多沉到身高的六成。")]
+        public float waterSinkDepth = 0.35f;
+
+        [Header("開場越獄：撬鎖（按住不放的秒數；0 表示這個身分不能撬鎖）")]
+        public float raccoonLockpickSeconds = 5f;
+        public float monkeyLockpickSeconds = 8f;
+        public float rabbitLockpickSeconds = 11f;
+
+        [Tooltip("烏龜開場沒有被關，這是牠幫隊友撬鎖時需要的秒數")]
+        public float turtleLockpickSeconds = 14f;
+
+        [Tooltip("離門的正中央多近才能撬鎖（公尺）")]
+        public float lockpickRange = 1.8f;
+
+        [Tooltip("門被撬開的那一刻，離門多近以內的動物會得到幾秒保護（和掙脫後的保護一樣長），免得人類守在門口")]
+        public float lockpickProtectRadius = 6f;
+
+        [Header("捕捉籠與救援（M3，全部是初始值，待測試）")]
+        [Tooltip("第 1、2、3 次被關進籠子的倒數秒數。倒數歸零就出局。")]
+        public float[] cageSeconds = { 120f, 80f, 40f };
+
+        [Tooltip("人類扛著動物，離籠子中心多近以內按 E 就會關進去（公尺）")]
+        public float putInCageRange = 2.8f;
+
+        [Tooltip("隊友在籠子旁按住 E 幾秒可以把籠子裡的動物救出來")]
+        public float rescueSeconds = 3f;
+
+        [Tooltip("隊友離籠子中心多近以內才能救（公尺）")]
+        public float rescueRange = 2.4f;
+
+        [Tooltip("被救出來之後幾秒內網子抓不到（保護中被網子打到只會變慢）")]
+        public float rescueProtectionSeconds = 5f;
+
+        [Tooltip("保護中被網子打到時，變慢幾秒")]
+        public float protectedNetSlowSeconds = 1.5f;
+
+        [Tooltip("保護中被網子打到時的速度倍率")]
+        [Range(0.1f, 1f)] public float protectedNetSlowMultiplier = 0.5f;
+
+        [Tooltip("反守籠：人類離關著動物的籠子多近算「在守」（公尺）")]
+        public float campRadius = 8f;
+
+        [Tooltip("反守籠：人類連續守超過幾秒，那個籠子的倒數就暫停（人類離開才繼續）。籠裡的動物不會因此自己出來。")]
+        public float campSecondsBeforePause = 10f;
+
+        [Tooltip("籠邊警報：人類離關著動物的籠子多近以內，動物們會收到「人類在 X 號籠附近」（公尺）")]
+        public float cageAlarmRadius = 15f;
+
+        [Header("聲音（全部是初始值，待試玩調整）")]
+        [Tooltip("人類跑步的腳步聲，動物在多遠以內聽得到（公尺）")]
+        public float humanFootstepRangeRun = 20f;
+
+        [Tooltip("人類慢走（按住 Shift）的腳步聲，動物在多遠以內聽得到（公尺）")]
+        public float humanFootstepRangeSneak = 8f;
+
+        [Tooltip("動物跑步時項圈鈴鐺的聲音，人類在多遠以內聽得到（公尺）")]
+        public float bellRangeRun = 18f;
+
+        [Tooltip("動物慢走（按住 Shift）時鈴鐺的聲音，人類在多遠以內聽得到（公尺）")]
+        public float bellRangeSneak = 5f;
+
+        [Tooltip("被網住、被關進籠子時的叫聲，多遠以內聽得到（公尺；100 等於整張地圖）")]
+        public float cryRange = 100f;
+
+        [Tooltip("速度超過自己全速的幾成算「跑」（聲音傳得遠）；慢走是 0.5，扛著動物是 0.7")]
+        [Range(0.1f, 1f)] public float runSpeedFraction = 0.65f;
+
+        [Tooltip("速度低於這個值（公尺／秒）算站著不動，完全沒有聲音")]
+        public float silentBelowSpeed = 0.5f;
+
+        [Tooltip("腳步聲的間隔（秒）：跑、慢走")]
+        public float footstepIntervalRun = 0.32f;
+        public float footstepIntervalSneak = 0.55f;
+
+        [Tooltip("鈴鐺響的間隔（秒）：跑、慢走")]
+        public float bellIntervalRun = 0.3f;
+        public float bellIntervalSneak = 0.6f;
+
+        [Tooltip("畫面邊緣的聲音提示停留幾秒後淡掉")]
+        public float soundCueSeconds = 2f;
+
+        [Range(0f, 1f)] public float soundVolume = 0.8f;
+
         [Header("介面")]
         [Tooltip("其他玩家頭上的名牌，離多遠以內才顯示（公尺）。被牆或障礙物擋住時不論多近都不顯示，才不會洩漏躲藏的位置。")]
         public float nameTagMaxDistance = 25f;
@@ -194,6 +291,67 @@ namespace AnimalEscape.Core
                     return turtle;
                 default:
                     return human;
+            }
+        }
+
+        /// <summary>第幾次被關（從 1 開始）的倒數秒數；超過設定的次數就是 0（表示直接出局）。</summary>
+        public float GetCageSeconds(int timesCaged)
+        {
+            if (cageSeconds == null || timesCaged < 1 || timesCaged > cageSeconds.Length)
+            {
+                return 0f;
+            }
+
+            return cageSeconds[timesCaged - 1];
+        }
+
+        /// <summary>最多可以被關幾次；再被抓一次就直接出局（預設 3 次，第 4 次出局）。</summary>
+        public int MaxTimesCaged
+        {
+            get { return cageSeconds != null ? cageSeconds.Length : 0; }
+        }
+
+        /// <summary>這個身分在水裡的速度倍率。0 表示不能下水。</summary>
+        public float GetWaterSpeedMultiplier(Role role)
+        {
+            switch (role)
+            {
+                case Role.Human:
+                    return humanWaterSpeedMultiplier;
+                case Role.Turtle:
+                    return turtleWaterSpeedMultiplier;
+                case Role.Rabbit:
+                    return rabbitWaterSpeedMultiplier;
+                case Role.Monkey:
+                    return monkeyWaterSpeedMultiplier;
+                case Role.Raccoon:
+                    return raccoonWaterSpeedMultiplier;
+                default:
+                    return 0f;
+            }
+        }
+
+        /// <summary>這個身分能不能下水。</summary>
+        public bool CanEnterWater(Role role)
+        {
+            return GetWaterSpeedMultiplier(role) > 0f;
+        }
+
+        /// <summary>這個身分撬開一道鎖要按住幾秒。0 表示不能撬（人類）。</summary>
+        public float GetLockpickSeconds(Role role)
+        {
+            switch (role)
+            {
+                case Role.Raccoon:
+                    return raccoonLockpickSeconds;
+                case Role.Monkey:
+                    return monkeyLockpickSeconds;
+                case Role.Rabbit:
+                    return rabbitLockpickSeconds;
+                case Role.Turtle:
+                    return turtleLockpickSeconds;
+                default:
+                    return 0f;
             }
         }
 
