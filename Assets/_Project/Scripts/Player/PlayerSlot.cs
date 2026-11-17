@@ -10,6 +10,21 @@ namespace AnimalEscape.Players
     /// 目前記錄玩家選的身分；之後被抓次數、是否已逃出等，也會放在這裡。
     /// 角色（PlayerAvatar）則是另一個物件，換身分時會重新產生。
     /// </summary>
+    /// <summary>一隻動物這一局的結果。</summary>
+    public enum MatchResult : byte
+    {
+        None = 0,
+
+        /// <summary>貨車開走時在車上。</summary>
+        Escaped = 1,
+
+        /// <summary>沒上車（被關、在實驗室、或還在場上沒趕上）。</summary>
+        Caught = 2,
+
+        /// <summary>比賽中按了「離開遊戲」。</summary>
+        Left = 3
+    }
+
     public class PlayerSlot : NetworkBehaviour
     {
         /// <summary>房間裡所有玩家的狀態（每台電腦各自維護）。</summary>
@@ -36,10 +51,25 @@ namespace AnimalEscape.Players
         public readonly NetworkVariable<int> Seat = new NetworkVariable<int>(0);
 
         /// <summary>
-        /// （動物）這一局被關進籠子幾次，決定下一次的倒數秒數（120／80／40），超過上限就出局。
+        /// （動物）這一局被抓進籠子幾次，決定下一次的倒數秒數（120／80），第 3 次直接送進實驗室。
         /// 還沒有「一局」的流程，所以先在每次選身分（重新出生）時歸零。
         /// </summary>
         public readonly NetworkVariable<int> TimesCaged = new NetworkVariable<int>(0);
+
+        /// <summary>
+        /// （動物）這一局是不是已經被門禁卡從實驗室救出來過。救出來過的，下次被抓就直接回實驗室（門禁卡整場只能用一次）。
+        /// 和 TimesCaged 一樣，每次選身分時歸零。
+        /// </summary>
+        public readonly NetworkVariable<bool> ReleasedFromLab = new NetworkVariable<bool>(false);
+
+        /// <summary>
+        /// 這位玩家在實驗室裡按了「離開遊戲」、但人還留在房間裡（主機才會這樣：主機離開房間會把整個房間關掉，
+        /// 所以主機只退出這一局，房間繼續開著）。角色已經收掉，介面顯示「你離開了這一局」。再選身分時清掉。
+        /// </summary>
+        public readonly NetworkVariable<bool> LeftMatch = new NetworkVariable<bool>(false);
+
+        /// <summary>（動物）上一局的結果：逃出、沒逃出、中途離開。結算畫面用；每一局開始時歸零。</summary>
+        public readonly NetworkVariable<MatchResult> Result = new NetworkVariable<MatchResult>(MatchResult.None);
 
         /// <summary>顯示用的玩家編號（P1、P2…）。</summary>
         public int PlayerNumber
@@ -106,6 +136,24 @@ namespace AnimalEscape.Players
             if (PlayerSpawner.Instance != null)
             {
                 PlayerSpawner.Instance.AssignRole(this, role);
+            }
+        }
+
+        /// <summary>玩家端呼叫：在實驗室裡退出這一局（角色收掉、人留在房間裡）。只有在實驗室裡才有效。</summary>
+        public void RequestLeaveMatch()
+        {
+            if (IsSpawned && IsOwner)
+            {
+                LeaveMatchRpc();
+            }
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+        void LeaveMatchRpc()
+        {
+            if (PlayerSpawner.Instance != null)
+            {
+                PlayerSpawner.Instance.LeaveMatch(this);
             }
         }
 

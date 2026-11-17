@@ -37,6 +37,9 @@ namespace AnimalEscape.EditorTools
     ///                           加 jump 表示起步時跳一下，加 sneak 表示慢走，
     ///                           加 thru 表示只是路過這一點（不減速，接著做下一個 walk，路線才順）
     ///     jump                  原地跳一下
+    ///     turn left|right|none [秒數] [前後]
+    ///                           模擬按住 ←→ 方向鍵幾秒（預設 1 秒）；前後是 −1～1，模擬同時按住 ↓／↑。
+    ///                           回報鏡頭和身體轉了幾度、走了多遠。GameConfig.arrowKeyTurning 關掉時 ←→ 是橫著走
     ///     swing                 （人類）揮網，和按滑鼠左鍵一樣
     ///     interact              （人類）扛起附近被網住的動物；已經扛著就是放下。和按 E 一樣
     ///     struggle [次數] [每秒幾下]
@@ -44,11 +47,24 @@ namespace AnimalEscape.EditorTools
     ///     pick [秒數上限]        （動物）按住撬鎖鍵，和按住 E 一樣；門開了、或超過上限（預設 20 秒）就放手，回報花了幾秒
     ///     unlock 身分|all        （主機）直接把某一種動物的收容區打開；lock 身分|all 是重新鎖上
     ///     rescue [秒數上限]      （動物）在關著隊友的籠子旁按住救援鍵，和按住 E 一樣；救出來、或超過上限（預設 15 秒）就放手
-    ///     cagetime 秒數 [籠號]   （主機）把籠子裡動物的倒數直接改成指定秒數（不給籠號就是全部），測出局用
+    ///     cagetime 秒數 [籠號]   （主機）把籠子裡動物的倒數直接改成指定秒數（不給籠號就是全部），測送進實驗室用
     ///     sounds                這個視窗的玩家「聽到」幾次腳步聲、鈴鐺、叫聲（上次 sounds 之後），和最近、最遠的距離；讀完歸零
-    ///     hold rescue|pick on|off
-    ///                           只按住／放開救援鍵或撬鎖鍵，不等結果（後面的指令照常執行），用來在進度條跑到一半時截圖
-    ///     spectate              （出局的玩家）換下一位隊友看，和按空白鍵一樣
+    ///     hold rescue|pick|swipe on|off
+    ///                           只按住／放開救援鍵、撬鎖鍵或刷卡鍵，不等結果（後面的指令照常執行），用來在進度條跑到一半時截圖
+    ///     lab P2                （主機）直接把 P2 的動物送進實驗室
+    ///     free P2               （主機）直接把關在籠子裡的 P2 放出來（像被隊友救了一樣）
+    ///     labexit               （在實驗室裡）按「離開遊戲」：一般玩家離開房間，主機只退出這一局（房間繼續開著）
+    ///     card [give P3|spot 2|reset|lab]
+    ///                           （主機）看門禁卡在哪；直接交給 P3；放回第 2 個候選位置；隨機重放；重新放球和卡
+    ///     swipe [秒數上限]       （拿著門禁卡的動物）在實驗室門口按住刷卡鍵，和按住 E 一樣；刷開、或超過上限（預設 15 秒）就放手
+    ///     emote 1～4            （在實驗室裡的動物）做表情，和按數字鍵一樣
+    ///     screen                （在實驗室的控台旁）大螢幕換下一位隊友，和按 E 一樣
+    ///     start                 （主機）開始比賽（和「開始比賽」「再來一局」按鈕一樣）
+    ///     chaos 數字             （主機）把混亂值直接設成這個數（100 就解鎖出口）
+    ///     timeleft 秒 / truck 秒  （主機）把這一局剩下的時間／貨車開走前的時間改成幾秒；openexit 直接打開出口
+    ///     break / console / exit [秒數上限]
+    ///                           按 E（小東西按一下、其他按住）弄倒最近的東西／用控制台（人類）／開出口，做完或超過上限就放手
+    ///     breakables [all]      這張地圖上可以破壞的東西有幾個、壞了幾個；all 會列出每一個的位置
     ///     teleport x y z [yaw]  把自己的角色直接放到指定位置
     ///     look yaw pitch [秒]   設定鏡頭方向；有給秒數就平順地轉過去
     ///     follow on|off         鏡頭自動轉向角色前進的方向
@@ -403,6 +419,10 @@ namespace AnimalEscape.EditorTools
                     StartWalk(label, args);
                     break;
 
+                case "turn":
+                    StartTurn(label, args);
+                    break;
+
                 case "teleport":
                     Teleport(label, args);
                     break;
@@ -477,7 +497,7 @@ namespace AnimalEscape.EditorTools
                 case "sounds":
                 {
                     var builder = new StringBuilder("聽到：");
-                    string[] names = { "腳步聲", "鈴鐺", "叫聲" };
+                    string[] names = { "腳步聲", "鈴鐺", "叫聲", "東西倒了" };
                     for (int i = 0; i < names.Length; i++)
                     {
                         SoundCues.Tally tally = SoundCues.TakeTally((SoundKind)i);
@@ -511,28 +531,166 @@ namespace AnimalEscape.EditorTools
                         avatar.GetComponent<PlayerLockpick>().SetExternalHold(on);
                         Report(label, "撬鎖鍵" + (on ? "按住" : "放開"));
                     }
+                    else if (which == "swipe")
+                    {
+                        avatar.GetComponent<PlayerKeycard>().SetExternalHold(on);
+                        Report(label, "刷卡鍵" + (on ? "按住" : "放開"));
+                    }
+                    else if (which == "task")
+                    {
+                        avatar.GetComponent<PlayerTask>().SetExternalHold(on);
+                        Report(label, "E（破壞／控制台／開門）" + (on ? "按住" : "放開"));
+                    }
                     else
                     {
-                        Report(label, "失敗：要寫 hold rescue on|off 或 hold pick on|off");
+                        Report(label, "失敗：要寫 hold rescue|pick|swipe on|off");
                     }
 
                     break;
                 }
 
-                case "spectate":
+                case "screen":
                 {
                     PlayerAvatar avatar = LocalAvatar();
-                    PlayerCapture capture = avatar != null ? avatar.Capture : null;
-                    if (capture == null || !capture.IsOut)
+                    PlayerParty party = avatar != null ? avatar.GetComponent<PlayerParty>() : null;
+                    LabRoom lab = LabRoom.Current;
+                    if (party == null || avatar.Capture == null || !avatar.Capture.IsInLab || lab == null)
                     {
-                        Report(label, "失敗：自己沒有出局");
+                        Report(label, "失敗：自己不在實驗室");
                         break;
                     }
 
-                    capture.RequestNextSpectate();
-                    Report(label, "換人看");
+                    if (!party.RequestNextScreen())
+                    {
+                        Report(label, "失敗：不在控台旁（離控台 " + Format(lab.DistanceToConsole(avatar.transform.position)) + " 公尺）");
+                        break;
+                    }
+
+                    Report(label, "大螢幕換人（原本在播 " + DescribeScreen(lab) + "；下一格才會換，用 report 看）");
                     break;
                 }
+
+                case "emote":
+                {
+                    PlayerAvatar avatar = LocalAvatar();
+                    PlayerParty party = avatar != null ? avatar.GetComponent<PlayerParty>() : null;
+                    int id = Mathf.RoundToInt(Number(args, 0));
+                    if (party == null)
+                    {
+                        Report(label, "失敗：沒有自己的角色");
+                        break;
+                    }
+
+                    bool allowed = party.CanEmote;
+                    party.RequestEmote(id);
+                    Report(label, allowed && id >= 1 && id <= PlayerParty.EmoteCount
+                        ? "表情 " + id + "（" + PlayerParty.EmoteNames[id] + "）"
+                        : "表情 " + id + "（現在不能做，主機不會理：要在實驗室裡、編號 1～" + PlayerParty.EmoteCount + "）");
+                    break;
+                }
+
+                case "lab":
+                    SendToLab(label, args);
+                    break;
+
+                case "labexit":
+                {
+                    // 和實驗室面板上的「離開遊戲」按鈕一樣：一般玩家離開房間；主機只退出這一局。
+                    PlayerAvatar avatar = LocalAvatar();
+                    if (avatar == null || avatar.Capture == null || !avatar.Capture.IsInLab)
+                    {
+                        Report(label, "失敗：自己不在實驗室");
+                        break;
+                    }
+
+                    GameHud.LeaveGameFromLab();
+                    Report(label, "按了離開遊戲");
+                    break;
+                }
+
+                case "free":
+                {
+                    // （主機）直接把關在籠子裡的動物放出來（像被隊友救了一樣），測「被抓第幾次」用。
+                    MatchState match = MatchState.Instance;
+                    PlayerAvatar avatar = FindAvatarByNumber(args.Length > 0 ? args[0] : "");
+                    if (match == null || !match.IsServer || avatar == null || avatar.Capture == null
+                        || avatar.Capture.State.Value != CaptureState.Caged)
+                    {
+                        Report(label, "失敗：要在主機上、而且那隻動物關在籠子裡（free P2 這樣寫）");
+                        break;
+                    }
+
+                    CaptureCage cage = CaptureCage.Find(avatar.Capture.CageNumber.Value);
+                    avatar.Capture.ServerRescue(cage != null ? cage.transform.position + Vector3.right * 3f : avatar.transform.position);
+                    Report(label, "P" + avatar.PlayerNumber + " 放出籠子");
+                    break;
+                }
+
+                case "card":
+                    KeycardCommand(label, args);
+                    break;
+
+                case "start":
+                {
+                    MatchFlow flow = MatchFlow.Instance;
+                    if (flow == null || !flow.IsServer)
+                    {
+                        Report(label, "失敗：要在開了房間的主機上下這個指令");
+                        break;
+                    }
+
+                    string reason;
+                    bool started = flow.ServerStartMatch(out reason);
+                    Report(label, started ? "開始比賽" : "不能開始：" + reason);
+                    break;
+                }
+
+                case "chaos":
+                case "timeleft":
+                case "truck":
+                case "openexit":
+                {
+                    MatchFlow flow = MatchFlow.Instance;
+                    if (flow == null || !flow.IsServer)
+                    {
+                        Report(label, "失敗：要在開了房間的主機上下這個指令");
+                        break;
+                    }
+
+                    if (verb == "chaos")
+                    {
+                        flow.ServerSetChaos(Number(args, 0));
+                    }
+                    else if (verb == "timeleft")
+                    {
+                        flow.ServerSetTimeLeft(Number(args, 0));
+                    }
+                    else if (verb == "truck")
+                    {
+                        flow.ServerSetTruckTime(Number(args, 0));
+                    }
+                    else
+                    {
+                        flow.ServerOpenExit();
+                    }
+
+                    Report(label, DescribeMatch());
+                    break;
+                }
+
+                case "break":
+                case "console":
+                case "exit":
+                    StartTask(label, verb, args);
+                    break;
+
+                case "breakables":
+                    Report(label, DescribeBreakables(args.Length > 0 && args[0] == "all"));
+                    break;
+
+                case "swipe":
+                    StartSwipe(label, args);
+                    break;
 
                 case "unlock":
                 case "lock":
@@ -760,6 +918,54 @@ namespace AnimalEscape.EditorTools
                 }
 
                 return false;
+            };
+        }
+
+        /// <summary>模擬按住 ←→（和 ↑↓）方向鍵幾秒，回報鏡頭和身體轉了多少、走了多遠。</summary>
+        static void StartTurn(string label, string[] args)
+        {
+            PlayerAvatar avatar = LocalAvatar();
+            PlayerMovement movement = avatar != null ? avatar.GetComponent<PlayerMovement>() : null;
+            PlayerCamera playerCamera = PlayerCamera.Instance;
+            if (movement == null || playerCamera == null)
+            {
+                Report(label, "失敗：沒有自己的角色");
+                return;
+            }
+
+            string side = args.Length > 0 ? args[0].ToLowerInvariant() : "right";
+            float turn = side == "left" ? -1f : (side == "right" ? 1f : 0f);
+            float seconds = args.Length > 1 ? Mathf.Clamp(Number(args, 1), 0.05f, 30f) : 1f;
+            float forward = args.Length > 2 ? Mathf.Clamp(Number(args, 2), -1f, 1f) : 0f;
+            float yawBefore = playerCamera.Yaw;
+            float bodyBefore = avatar.transform.eulerAngles.y;
+            Vector3 startPosition = avatar.transform.position;
+            double startedAt = EditorApplication.timeSinceStartup;
+            movement.SetExternalTurn(turn, forward);
+
+            s_ActiveLabel = label;
+            s_Active = deltaTime =>
+            {
+                if (avatar == null || !avatar.IsSpawned)
+                {
+                    Report(label, "失敗：角色不見了");
+                    return true;
+                }
+
+                double elapsed = EditorApplication.timeSinceStartup - startedAt;
+                if (elapsed < seconds)
+                {
+                    return false;
+                }
+
+                movement.ClearExternalTurn();
+                Vector3 moved = avatar.transform.position - startPosition;
+                moved.y = 0f;
+                Report(label, "按了 " + Format((float)elapsed) + " 秒（方向鍵轉鏡頭" + (GameConfig.Instance.arrowKeyTurning ? "開" : "關") + "）："
+                    + "鏡頭 yaw " + Format(yawBefore) + " → " + Format(playerCamera.Yaw) + "（" + Format(playerCamera.Yaw - yawBefore) + " 度）"
+                    + "｜身體 " + Format(bodyBefore) + " → " + Format(avatar.transform.eulerAngles.y)
+                    + "｜走了 " + Format(moved.magnitude) + " 公尺" + DescribeAvatar(avatar));
+                return true;
             };
         }
 
@@ -1516,6 +1722,402 @@ namespace AnimalEscape.EditorTools
             };
         }
 
+        /// <summary>依玩家編號找角色（P2 或 2）；找不到就是 null。</summary>
+        static PlayerAvatar FindAvatarByNumber(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return null;
+            }
+
+            int number;
+            if (!int.TryParse(text.TrimStart('P', 'p'), NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+            {
+                return null;
+            }
+
+            for (int i = 0; i < PlayerAvatar.All.Count; i++)
+            {
+                PlayerAvatar avatar = PlayerAvatar.All[i];
+                if (avatar != null && avatar.IsSpawned && avatar.PlayerNumber == number)
+                {
+                    return avatar;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>（主機）直接把某位玩家的動物送進實驗室（不用關三次籠子）。</summary>
+        static void SendToLab(string label, string[] args)
+        {
+            MatchState match = MatchState.Instance;
+            if (match == null || !match.IsServer)
+            {
+                Report(label, "失敗：要在開了房間的主機上下這個指令");
+                return;
+            }
+
+            PlayerAvatar avatar = FindAvatarByNumber(args.Length > 0 ? args[0] : "");
+            if (avatar == null || avatar.Capture == null || !Roles.IsAnimal(avatar.AvatarRole.Value))
+            {
+                Report(label, "失敗：找不到這位玩家的動物（要寫 lab P2 這樣）");
+                return;
+            }
+
+            avatar.Capture.ServerSendToLab();
+            Report(label, "P" + avatar.PlayerNumber + " 送進實驗室（落點 " + Format(avatar.Capture.DropPoint.Value) + "）");
+        }
+
+        /// <summary>
+        /// （主機）門禁卡：card（看現在在哪）、card give P3（直接交給 P3）、card spot 2（放回第 2 個候選位置）、card reset（隨機重放）、
+        /// card lab（重新放球和卡，像剛換地圖一樣）。
+        /// </summary>
+        static void KeycardCommand(string label, string[] args)
+        {
+            MatchState match = MatchState.Instance;
+            if (match == null)
+            {
+                Report(label, "失敗：還沒開房");
+                return;
+            }
+
+            string action = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+            if (action != "" && !match.IsServer)
+            {
+                Report(label, "失敗：只有主機能改門禁卡");
+                return;
+            }
+
+            switch (action)
+            {
+                case "":
+                    break;
+                case "give":
+                {
+                    PlayerAvatar avatar = FindAvatarByNumber(args.Length > 1 ? args[1] : "");
+                    if (avatar == null)
+                    {
+                        Report(label, "失敗：要寫 card give P3 這樣");
+                        return;
+                    }
+
+                    match.ServerGiveKeycard(avatar);
+                    break;
+                }
+
+                case "spot":
+                    match.ServerResetKeycard(Mathf.RoundToInt(Number(args, 1)) - 1);
+                    break;
+                case "reset":
+                    match.ServerResetKeycard(-1);
+                    break;
+                case "lab":
+                    match.ServerResetLab(-1);
+                    break;
+                default:
+                    Report(label, "失敗：要寫 card、card give P3、card spot 2、card reset 或 card lab");
+                    return;
+            }
+
+            Report(label, DescribeLab());
+        }
+
+        /// <summary>（拿著門禁卡的動物）在實驗室門口按住刷卡鍵直到刷開；swipe 2 表示最多按 2 秒就放手。</summary>
+        static void StartSwipe(string label, string[] args)
+        {
+            PlayerAvatar avatar = LocalAvatar();
+            PlayerKeycard keycard = avatar != null ? avatar.GetComponent<PlayerKeycard>() : null;
+            if (keycard == null)
+            {
+                Report(label, "失敗：沒有自己的角色");
+                return;
+            }
+
+            if (keycard.DoorInReach == null)
+            {
+                LabRoom lab = LabRoom.Current;
+                Report(label, "失敗：不在實驗室門口或沒拿著卡（拿著卡=" + keycard.HoldsKeycard + "，離門外 "
+                    + (lab != null ? Format(lab.DistanceToDoorOutside(avatar.transform.position)) : "？") + " 公尺）");
+                return;
+            }
+
+            float limit = args.Length > 0 ? Mathf.Clamp(Number(args, 0), 0.1f, 60f) : 15f;
+            double startedAt = EditorApplication.timeSinceStartup;
+            bool everStarted = false;
+            keycard.SetExternalHold(true);
+
+            s_ActiveLabel = label;
+            s_Active = deltaTime =>
+            {
+                if (avatar == null || !avatar.IsSpawned)
+                {
+                    Report(label, "失敗：角色不見了");
+                    return true;
+                }
+
+                double elapsed = EditorApplication.timeSinceStartup - startedAt;
+                everStarted |= keycard.IsSwiping;
+                MatchState match = MatchState.Instance;
+                if (match != null && match.Keycard.Value == KeycardStatus.Used)
+                {
+                    keycard.SetExternalHold(false);
+                    Report(label, "刷開了：按了 " + Format((float)elapsed) + " 秒，放出 " + match.LabReleasedCount.Value + " 隻");
+                    return true;
+                }
+
+                if (elapsed >= limit)
+                {
+                    keycard.SetExternalHold(false);
+                    Report(label, "放手了（按了 " + Format((float)elapsed) + " 秒，還沒刷開；"
+                        + (everStarted ? "進度到 " + Format(keycard.Progress) : "主機沒有開始計時") + "）" + DescribeAvatar(avatar));
+                    return true;
+                }
+
+                return false;
+            };
+        }
+
+        /// <summary>
+        /// （M4）按住 E 做 break／console／exit，直到做完或超過上限秒數（預設 15 秒）。
+        /// break：最近的那個東西倒了就結束（小東西是按一下）；console：控制台開始冷卻就結束；exit：門開了就結束。
+        /// </summary>
+        static void StartTask(string label, string verb, string[] args)
+        {
+            PlayerAvatar avatar = LocalAvatar();
+            PlayerTask task = avatar != null ? avatar.GetComponent<PlayerTask>() : null;
+            MatchFlow flow = MatchFlow.Instance;
+            if (task == null || flow == null)
+            {
+                Report(label, "失敗：沒有自己的角色或還沒開房");
+                return;
+            }
+
+            TaskKind wanted = verb == "break" ? TaskKind.Break : (verb == "console" ? TaskKind.Console : TaskKind.Exit);
+            int target;
+            TaskKind kind = task.FindCandidate(out target);
+            if (kind != wanted)
+            {
+                Report(label, "失敗：這裡按 E 做不了「" + verb + "」（現在會做 " + kind + "）" + DescribeAvatar(avatar));
+                return;
+            }
+
+            Breakable item = wanted == TaskKind.Break ? Breakable.Find(target) : null;
+            float chaosBefore = flow.Chaos.Value;
+            float limit = args.Length > 0 ? Mathf.Clamp(Number(args, 0), 0.1f, 60f) : 15f;
+            double startedAt = EditorApplication.timeSinceStartup;
+            bool everStarted = false;
+            if (item != null && GameConfig.Instance.GetBreakSeconds(item.size) <= 0f)
+            {
+                task.ExternalTap();
+            }
+            else
+            {
+                task.SetExternalHold(true);
+            }
+
+            s_ActiveLabel = label;
+            s_Active = deltaTime =>
+            {
+                if (avatar == null || !avatar.IsSpawned)
+                {
+                    Report(label, "失敗：角色不見了");
+                    return true;
+                }
+
+                double elapsed = EditorApplication.timeSinceStartup - startedAt;
+                everStarted |= task.IsWorking;
+                bool done = wanted == TaskKind.Break ? item != null && item.IsBroken
+                    : wanted == TaskKind.Console ? flow.GetConsoleReadyAt(target) > PlayerCapture.Now
+                    : flow.ExitOpen.Value;
+                if (done)
+                {
+                    task.SetExternalHold(false);
+                    string what = wanted == TaskKind.Break ? "弄倒了 " + item.index + " 號（" + item.displayName + "，" + item.size + "）"
+                        : wanted == TaskKind.Console ? "用了 " + (target + 1) + " 號控制台" : "門開了";
+                    Report(label, what + "：按了 " + Format((float)elapsed) + " 秒，混亂值 " + Format(chaosBefore) + " → " + Format(flow.Chaos.Value)
+                        + "｜" + DescribeMatch());
+                    return true;
+                }
+
+                if (elapsed >= limit)
+                {
+                    task.SetExternalHold(false);
+                    Report(label, "放手了（按了 " + Format((float)elapsed) + " 秒，還沒做完；"
+                        + (everStarted ? "進度到 " + Format(task.Progress) : "主機沒有開始計時") + "）" + DescribeAvatar(avatar));
+                    return true;
+                }
+
+                return false;
+            };
+        }
+
+        /// <summary>比賽的狀態：階段、剩幾秒、混亂值、壞了幾個、控制台冷卻、出口、貨車、結果。</summary>
+        static string DescribeMatch()
+        {
+            MatchFlow flow = MatchFlow.Instance;
+            if (flow == null)
+            {
+                return "比賽：（還沒開房）";
+            }
+
+            var builder = new StringBuilder("比賽=").Append(flow.Phase.Value);
+            if (flow.IsPlaying)
+            {
+                builder.Append(" 剩=").Append(Format(flow.TimeLeft)).Append("s");
+            }
+
+            int broken = 0;
+            for (int i = 0; i < Breakable.Active.Count; i++)
+            {
+                if (Breakable.Active[i] != null && Breakable.Active[i].IsBroken)
+                {
+                    broken++;
+                }
+            }
+
+            builder.Append(" 混亂值=").Append(Format(flow.Chaos.Value)).Append(" 壞了=").Append(broken).Append('/').Append(Breakable.Active.Count);
+            builder.Append(" 控制台冷卻=");
+            for (int i = 0; i < MatchFlow.ConsoleCount; i++)
+            {
+                builder.Append(i > 0 ? "," : "").Append(Format(Mathf.Max(0f, (float)(flow.GetConsoleReadyAt(i) - PlayerCapture.Now))));
+            }
+
+            builder.Append(flow.ExitUnlocked ? " 出口=解鎖" : " 出口=鎖著");
+            if (flow.ExitOpen.Value)
+            {
+                builder.Append("（開了，貨車剩 ").Append(Format(flow.TruckTimeLeft)).Append("s）");
+            }
+            else if (flow.ExitProgress.Value > 0f || flow.ExitHelpers.Value > 0)
+            {
+                builder.Append("（開門 ").Append(Format(flow.ExitProgress.Value)).Append("，").Append(flow.ExitHelpers.Value).Append(" 隻在開）");
+            }
+
+            if (flow.Phase.Value == MatchPhase.Results)
+            {
+                builder.Append(" 結果=").Append(flow.Outcome.Value).Append(" 原因=").Append(flow.EndReason.Value)
+                    .Append(" 上車=").Append(flow.EscapedCount.Value).Append('/').Append(flow.AnimalCount.Value);
+                for (int i = 0; i < PlayerSlot.All.Count; i++)
+                {
+                    PlayerSlot slot = PlayerSlot.All[i];
+                    if (slot != null && slot.Result.Value != MatchResult.None)
+                    {
+                        builder.Append(" P").Append(slot.PlayerNumber).Append('=').Append(slot.Result.Value);
+                    }
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>這張地圖上可以破壞的東西：幾個、大小各幾個、壞了幾個；all 時列出每一個的位置。</summary>
+        static string DescribeBreakables(bool all)
+        {
+            int[] counts = new int[3];
+            int broken = 0;
+            var builder = new StringBuilder();
+            var list = new System.Collections.Generic.List<Breakable>(Breakable.Active);
+            list.Sort((a, b) => a.index.CompareTo(b.index));
+            for (int i = 0; i < list.Count; i++)
+            {
+                Breakable item = list[i];
+                counts[(int)item.size]++;
+                if (item.IsBroken)
+                {
+                    broken++;
+                }
+
+                if (all)
+                {
+                    builder.Append(i % 4 == 0 ? "\n    " : "  ").Append(item.index).Append(':').Append(item.displayName)
+                        .Append(Format(item.transform.position)).Append(item.IsBroken ? "(壞)" : "");
+                }
+            }
+
+            Breakable target = Breakable.LocalTarget >= 0 ? Breakable.Find(Breakable.LocalTarget) : null;
+            return "可以破壞的東西 " + list.Count + " 個（小 " + counts[0] + "、中 " + counts[1] + "、大 " + counts[2] + "），壞了 " + broken + " 個"
+                + "｜這個畫面的標記 " + GameHud.BreakMarkersDrawn + " 個｜按 E 會弄倒："
+                + (target != null ? "#" + target.index + " " + target.displayName + Format(target.transform.position) : "（沒有）")
+                + builder;
+        }
+
+        /// <summary>這台電腦的大螢幕在播誰。</summary>
+        static string DescribeScreen(LabRoom lab)
+        {
+            if (lab == null || !lab.ScreenOn)
+            {
+                return "（沒開）";
+            }
+
+            return lab.ScreenTarget != null ? "P" + lab.ScreenTarget.PlayerNumber + " " + lab.ScreenTarget.AvatarRole.Value : "全景";
+        }
+
+        /// <summary>實驗室裡有誰、門禁卡在哪、球在哪、這台電腦的大螢幕在播誰。</summary>
+        static string DescribeLab()
+        {
+            LabRoom lab = LabRoom.Current;
+            if (lab == null)
+            {
+                return "實驗室：（這張地圖沒有）";
+            }
+
+            var builder = new StringBuilder("實驗室：");
+            bool any = false;
+            for (int i = 0; i < PlayerAvatar.All.Count; i++)
+            {
+                PlayerAvatar avatar = PlayerAvatar.All[i];
+                if (avatar != null && avatar.IsSpawned && avatar.Capture != null && avatar.Capture.IsInLab)
+                {
+                    builder.Append(any ? "," : "").Append('P').Append(avatar.PlayerNumber);
+                    any = true;
+                }
+            }
+
+            if (!any)
+            {
+                builder.Append("沒人");
+            }
+
+            MatchState match = MatchState.Instance;
+            if (match != null)
+            {
+                builder.Append(" 門禁卡=");
+                switch (match.Keycard.Value)
+                {
+                    case KeycardStatus.OnGround:
+                        builder.Append("地上").Append(Format(match.KeycardPosition.Value));
+                        break;
+                    case KeycardStatus.Held:
+                    {
+                        PlayerAvatar holder = match.KeycardHolderAvatar;
+                        builder.Append(holder != null ? "P" + holder.PlayerNumber + "拿著" : "有人拿著（找不到）");
+                        break;
+                    }
+
+                    default:
+                        builder.Append(match.Keycard.Value);
+                        break;
+                }
+
+                if (match.LabReleasedCount.Value > 0)
+                {
+                    builder.Append(" 上次刷開放出=").Append(match.LabReleasedCount.Value);
+                }
+            }
+
+            builder.Append(" 球=").Append(LabBall.Active.Count);
+            for (int i = 0; i < LabBall.Active.Count; i++)
+            {
+                if (LabBall.Active[i] != null)
+                {
+                    builder.Append(' ').Append(Format(LabBall.Active[i].transform.position));
+                }
+            }
+
+            builder.Append(" 大螢幕=").Append(DescribeScreen(lab));
+            return builder.ToString();
+        }
+
         /// <summary>（主機）直接改籠子裡動物的倒數秒數。</summary>
         static void SetCageTime(string label, string[] args)
         {
@@ -1676,6 +2278,8 @@ namespace AnimalEscape.EditorTools
             {
                 builder.Append("｜").Append(DescribeHabitats());
                 builder.Append("｜").Append(DescribeCages());
+                builder.Append("｜").Append(DescribeLab());
+                builder.Append("｜").Append(DescribeMatch());
             }
 
             builder.Append("｜玩家數=").Append(PlayerSlot.All.Count);
@@ -1704,8 +2308,7 @@ namespace AnimalEscape.EditorTools
                 // 別人的名牌現在在我的畫面上會不會顯示（和遊戲介面用的是同一個判斷）
                 if (!avatar.IsOwner && playerCamera != null && playerCamera.Camera != null)
                 {
-                    bool outOfPlay = avatar.Capture != null && avatar.Capture.IsOut;
-                    builder.Append(!outOfPlay && GameHud.IsNameTagVisible(playerCamera.Camera, avatar) ? " 名牌=顯示" : " 名牌=不顯示");
+                    builder.Append(GameHud.IsNameTagVisible(playerCamera.Camera, avatar) ? " 名牌=顯示" : " 名牌=不顯示");
                 }
             }
 
@@ -1825,10 +2428,38 @@ namespace AnimalEscape.EditorTools
                 builder.Append(" 救援中=").Append(rescue.TargetCage.Value).Append("號籠 ").Append(Format(rescue.Progress));
             }
 
+            var keycard = avatar.GetComponent<PlayerKeycard>();
+            if (keycard != null && keycard.HoldsKeycard)
+            {
+                builder.Append(" 拿著門禁卡");
+            }
+
+            if (keycard != null && keycard.IsSwiping)
+            {
+                builder.Append(" 刷卡中=").Append(Format(keycard.Progress));
+            }
+
+            var task = avatar.GetComponent<PlayerTask>();
+            if (task != null && task.IsWorking)
+            {
+                builder.Append(" 正在=").Append(task.Kind.Value).Append(task.Kind.Value == TaskKind.Exit ? "" : " " + Format(task.Progress));
+            }
+
+            var party = avatar.GetComponent<PlayerParty>();
+            if (party != null && party.CurrentEmote > 0)
+            {
+                builder.Append(" 表情=").Append(PlayerParty.EmoteNames[party.CurrentEmote]);
+            }
+
             PlayerSlot slot = PlayerSlot.FindByClient(avatar.OwnerClientId);
             if (slot != null && slot.TimesCaged.Value > 0)
             {
                 builder.Append(" 被關過=").Append(slot.TimesCaged.Value).Append("次");
+            }
+
+            if (slot != null && slot.ReleasedFromLab.Value)
+            {
+                builder.Append(" 被門禁卡救過");
             }
 
             return builder.ToString();
@@ -1852,12 +2483,17 @@ namespace AnimalEscape.EditorTools
                 builder.Append(" 狀態=Caged ").Append(capture.CageNumber.Value).Append("號籠 剩=").Append(Format(capture.CageTimeLeft.Value)).Append("s")
                     .Append(capture.CagePaused.Value ? "（暫停）" : "");
             }
-            else if (capture.State.Value == CaptureState.Out)
+            else if (capture.State.Value == CaptureState.Escaped)
             {
-                builder.Append(" 狀態=Out");
-                if (capture == PlayerCapture.Local)
+                builder.Append(" 狀態=Escaped（在貨車上）");
+            }
+            else if (capture.State.Value == CaptureState.InLab)
+            {
+                builder.Append(" 狀態=InLab");
+                LabRoom lab = LabRoom.Current;
+                if (lab != null && !lab.Contains(capture.transform.position))
                 {
-                    builder.Append(capture.Spectating != null ? " 看P" + capture.Spectating.PlayerNumber : " 看全圖");
+                    builder.Append("（但不在實驗室範圍裡！）");
                 }
             }
 

@@ -9,7 +9,8 @@ namespace AnimalEscape.Players
 {
     /// <summary>
     /// 追與抓（M2）：人類揮網、動物被網住與掙脫、人類扛走、隊友推撞；
-    /// 捕捉籠（M3）：人類把扛著的動物關進籠子、籠子倒數、反守籠、出局後觀看隊友（救援在 PlayerRescue）。
+    /// 捕捉籠（M3）：人類把扛著的動物關進籠子、籠子倒數、反守籠（救援在 PlayerRescue）；
+    /// 實驗室：倒數歸零或第 3 次被抓就送進實驗室（ServerSendToLab），門禁卡刷開時放出來（ServerReleaseFromLab，由 MatchState 呼叫）。
     ///
     /// 判定全部在主機：玩家端只送出「我按了揮網／扛起／掙脫」「我撞到人了」，主機檢查距離、角度、冷卻之後才改狀態，
     /// 狀態再用 NetworkVariable 同步給所有人。數值都在 GameConfig 的「追與抓」。
@@ -99,9 +100,6 @@ namespace AnimalEscape.Players
         float m_CageSyncTimer;
         float m_CampSeconds;
 
-        // 只有擁有者用：出局後正在看哪一位隊友
-        PlayerAvatar m_Spectating;
-
         // 只有擁有者用
         float m_LastBumpReportTime = -100f;
 
@@ -138,10 +136,15 @@ namespace AnimalEscape.Players
             get { return m_Avatar != null && m_Avatar.AvatarRole.Value == Role.Human; }
         }
 
-        /// <summary>（動物）現在能不能自己走動。被網住、被扛著、出局都不行；在籠子裡可以走（出不去）。</summary>
+        /// <summary>（動物）現在能不能自己走動。被網住、被扛著不行；在籠子裡、在實驗室裡、在貨車上可以走。</summary>
         public bool CanMove
         {
-            get { return State.Value == CaptureState.Free || State.Value == CaptureState.Caged; }
+            get
+            {
+                CaptureState state = State.Value;
+                return state == CaptureState.Free || state == CaptureState.Caged || state == CaptureState.InLab
+                    || state == CaptureState.Escaped;
+            }
         }
 
         /// <summary>（動物）是不是被網住或被扛著（這兩種情況可以連按掙脫）。</summary>
@@ -150,20 +153,15 @@ namespace AnimalEscape.Players
             get { return State.Value == CaptureState.Netted || State.Value == CaptureState.Carried; }
         }
 
-        public bool IsOut
+        /// <summary>（動物）是不是被送進實驗室了。</summary>
+        public bool IsInLab
         {
-            get { return State.Value == CaptureState.Out; }
+            get { return State.Value == CaptureState.InLab; }
         }
 
         public bool IsSlowed
         {
             get { return Now < SlowUntil.Value; }
-        }
-
-        /// <summary>（擁有者端，出局後）正在看的隊友；沒有就是 null。</summary>
-        public PlayerAvatar Spectating
-        {
-            get { return m_Spectating; }
         }
 
         /// <summary>（人類）扛著動物時，按 E 會關進去的那個空籠子；沒有就是 null。主機判定和介面提示用同一個。</summary>
@@ -336,11 +334,6 @@ namespace AnimalEscape.Players
             }
 
             DisposeInput();
-            if (IsOwner)
-            {
-                StopSpectating(false);
-            }
-
             if (Local == this)
             {
                 Local = null;
@@ -436,10 +429,6 @@ namespace AnimalEscape.Players
             {
                 ReadInput();
                 CheckBump();
-                if (State.Value == CaptureState.Out)
-                {
-                    UpdateSpectate();
-                }
             }
         }
 
@@ -565,7 +554,9 @@ namespace AnimalEscape.Players
                 ServerResolveSwing();
             }
 
-            if (State.Value == CaptureState.Caged)
+            // 結算的時候籠子的倒數停住（比賽已經結束了）。
+            if (State.Value == CaptureState.Caged
+                && (MatchFlow.Instance == null || MatchFlow.Instance.Phase.Value != MatchPhase.Results))
             {
                 ServerUpdateCage(config);
             }
@@ -846,7 +837,7 @@ namespace AnimalEscape.Players
 
         /// <summary>
         /// （人類身上呼叫）把扛著的動物關進籠子。被關的次數記在玩家狀態（PlayerSlot.TimesCaged）；
-        /// 超過可以被關的次數（預設第 4 次）就直接出局。
+        /// 超過可以被關的次數（預設第 3 次），或是這一局已經被門禁卡從實驗室救出來過，就直接送進實驗室。
         /// </summary>
         void ServerPutInCage(PlayerCapture animal, CaptureCage cage)
         {
@@ -867,15 +858,16 @@ namespace AnimalEscape.Players
             animal.m_StruggleExact = 0f;
             animal.Struggle.Value = 0f;
 
-            // 先寫位置和籠子編號，再改狀態（見 DropPoint 宣告處的說明）。
-            animal.DropPoint.Value = cage.InsidePoint;
             float seconds = config.GetCageSeconds(times);
-            if (seconds <= 0f)
+            bool releasedBefore = slot != null && slot.ReleasedFromLab.Value;
+            if (seconds <= 0f || releasedBefore)
             {
-                animal.ServerSetOut();
+                animal.ServerSendToLab();
                 return;
             }
 
+            // 先寫位置和籠子編號，再改狀態（見 DropPoint 宣告處的說明）。
+            animal.DropPoint.Value = cage.InsidePoint;
             animal.CageNumber.Value = cage.number;
             animal.m_CageTimeExact = seconds;
             animal.m_CageSyncTimer = 0f;
@@ -918,7 +910,7 @@ namespace AnimalEscape.Players
 
             if (m_CageTimeExact <= 0f)
             {
-                ServerSetOut();
+                ServerSendToLab();
                 return;
             }
 
@@ -946,18 +938,176 @@ namespace AnimalEscape.Players
             }
         }
 
-        /// <summary>主機端：出局（倒數歸零，或被關的次數超過上限）。角色從場上消失，玩家改成看隊友。</summary>
-        public void ServerSetOut()
+        /// <summary>
+        /// 主機端：送進實驗室（籠子倒數歸零、第 3 次被抓、或救出來過又被抓）。
+        /// 從籠子或人類肩上直接搬進實驗室裡的空位，由擁有者那台電腦自己瞬移過去（和放下、關籠同一套）。
+        /// </summary>
+        public void ServerSendToLab()
         {
             if (!IsServer)
             {
                 return;
             }
 
+            // 從人類肩上直接送進來時，人類的手要空出來。
+            PlayerCapture carrier = Carrier;
+            if (carrier != null && carrier.IsSpawned && carrier.CarryingId.Value == NetworkObjectId)
+            {
+                carrier.CarryingId.Value = None;
+            }
+
+            RoleSettings settings = m_Avatar.Settings;
+            float radius = settings.radius;
+            float height = Mathf.Max(settings.height, radius * 2f);
+            LabRoom lab = LabRoom.Current;
+            Vector3 spot = lab != null
+                ? lab.FindInsideSpot(radius, point => IsSpaceFree(point, radius, height, Physics.DefaultRaycastLayers)
+                    && IsClearOfLabMates(point, radius))
+                : transform.position;
+
+            CarrierId.Value = None;
+            m_StruggleExact = 0f;
+            Struggle.Value = 0f;
             CageNumber.Value = 0;
             CagePaused.Value = false;
             CageTimeLeft.Value = 0f;
-            State.Value = CaptureState.Out;
+
+            // 先寫位置，再改狀態（見 DropPoint 宣告處的說明）。
+            DropPoint.Value = spot;
+            State.Value = CaptureState.InLab;
+        }
+
+        /// <summary>
+        /// 主機端（開始比賽時，PlayerSpawner 呼叫）：狀態全部清掉（扛人、被扛、網子、籠子、實驗室、貨車、保護、踉蹌、冷卻），
+        /// 回到自由，並請擁有這個角色的電腦把它搬到出生點。
+        /// </summary>
+        public void ServerResetForMatch(Vector3 position, Quaternion rotation)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            CarryingId.Value = None;
+            CarrierId.Value = None;
+            m_PendingSwingAt = -1.0;
+            m_StruggleExact = 0f;
+            Struggle.Value = 0f;
+            m_CampSeconds = 0f;
+            CageNumber.Value = 0;
+            CagePaused.Value = false;
+            CageTimeLeft.Value = 0f;
+            ProtectedUntil.Value = -100.0;
+            SlowUntil.Value = -100.0;
+            StaggerUntil.Value = -100.0;
+            NetReadyAt.Value = -100.0;
+
+            // 先寫位置再改狀態：原本被扛著、在籠子裡、在實驗室的，狀態改變時就會搬到這裡（OnStateChanged）。
+            DropPoint.Value = position;
+            State.Value = CaptureState.Free;
+
+            // 原本就是自由的（狀態沒變，不會觸發上面那一段），另外請擁有者搬過去。
+            MoveToRpc(position, rotation);
+        }
+
+        /// <summary>（擁有者）把自己搬到指定的位置。CharacterController 要先停用，不然下一次移動會被拉回原處。</summary>
+        [Rpc(SendTo.Owner)]
+        void MoveToRpc(Vector3 position, Quaternion rotation)
+        {
+            if (m_Controller != null)
+            {
+                m_Controller.enabled = false;
+            }
+
+            if (m_NetworkTransform != null)
+            {
+                m_NetworkTransform.Teleport(position, rotation, transform.localScale);
+            }
+            else
+            {
+                transform.SetPositionAndRotation(position, rotation);
+            }
+
+            if (m_Movement != null)
+            {
+                m_Movement.ResetVerticalSpeed();
+            }
+
+            if (m_Controller != null)
+            {
+                m_Controller.enabled = State.Value != CaptureState.Carried;
+            }
+        }
+
+        /// <summary>
+        /// 主機端（MatchFlow 呼叫）：走進貨車車廂＝上了貨車（網子抓不到）；走出車廂＝下車，變回自由。位置不動，不用搬。
+        /// </summary>
+        public void ServerSetEscaped(bool escaped)
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            if (escaped && State.Value == CaptureState.Free)
+            {
+                State.Value = CaptureState.Escaped;
+            }
+            else if (!escaped && State.Value == CaptureState.Escaped)
+            {
+                State.Value = CaptureState.Free;
+            }
+        }
+
+        /// <summary>
+        /// 這一點離已經在實驗室裡的其他動物夠不夠遠。物理檢查看不到「剛被送進來、還沒搬過去」的動物
+        /// （同一格送兩隻進來時兩隻會拿到同一個位置；2026-11-17 實測），所以也比對牠們的落點。
+        /// </summary>
+        bool IsClearOfLabMates(Vector3 point, float radius)
+        {
+            for (int i = 0; i < PlayerAvatar.All.Count; i++)
+            {
+                PlayerAvatar avatar = PlayerAvatar.All[i];
+                PlayerCapture other = avatar != null && avatar.IsSpawned ? avatar.Capture : null;
+                if (other == null || other == this || !other.IsInLab)
+                {
+                    continue;
+                }
+
+                float minimum = radius + avatar.Settings.radius + 0.2f;
+                Vector3 toDrop = other.DropPoint.Value - point;
+                Vector3 toBody = avatar.transform.position - point;
+                toDrop.y = 0f;
+                toBody.y = 0f;
+                if (toDrop.magnitude < minimum || toBody.magnitude < minimum)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 主機端（MatchState 刷卡成功時呼叫）：從實驗室放出來，搬到門外指定的位置，並給保護時間。
+        /// 記一筆「救出來過」：門禁卡整場只能用一次，所以下次被抓就直接回實驗室。
+        /// </summary>
+        public void ServerReleaseFromLab(Vector3 spot)
+        {
+            if (!IsServer || State.Value != CaptureState.InLab)
+            {
+                return;
+            }
+
+            PlayerSlot slot = PlayerSlot.FindByClient(OwnerClientId);
+            if (slot != null)
+            {
+                slot.ReleasedFromLab.Value = true;
+            }
+
+            DropPoint.Value = spot;
+            ProtectedUntil.Value = Now + GameConfig.Instance.labReleaseProtectionSeconds;
+            State.Value = CaptureState.Free;
         }
 
         /// <summary>
@@ -1009,110 +1159,6 @@ namespace AnimalEscape.Players
             }
 
             return center + Quaternion.Euler(0f, baseYaw, 0f) * Vector3.forward * distance;
-        }
-
-        // ------------------------------------------------------------------
-        // 擁有者端：出局後看隊友
-        // ------------------------------------------------------------------
-
-        bool m_SpectateNextRequested;
-
-        /// <summary>（出局的玩家）換下一位隊友看（測試工具用；和按空白鍵一樣）。</summary>
-        public void RequestNextSpectate()
-        {
-            m_SpectateNextRequested = true;
-        }
-
-        /// <summary>出局後，鏡頭跟著還在場上的隊友；空白鍵換下一位。沒有隊友就看整張地圖。</summary>
-        void UpdateSpectate()
-        {
-            PlayerCamera playerCamera = PlayerCamera.Instance;
-            if (playerCamera == null)
-            {
-                return;
-            }
-
-            bool next = m_SpectateNextRequested
-                || (Application.isFocused && m_StruggleAction != null && m_StruggleAction.WasPressedThisFrame());
-            m_SpectateNextRequested = false;
-            bool valid = m_Spectating != null && m_Spectating.IsSpawned && IsWatchable(m_Spectating);
-            if (valid && !next && playerCamera.HasTarget)
-            {
-                return;
-            }
-
-            PlayerAvatar pick = NextWatchable(valid ? m_Spectating : null);
-            if (pick != null && pick == m_Spectating && playerCamera.HasTarget)
-            {
-                return;
-            }
-
-            StopSpectating(false);
-            if (pick != null)
-            {
-                m_Spectating = pick;
-                playerCamera.SetTarget(pick.transform, pick.AvatarRole.Value);
-            }
-            else
-            {
-                // 沒有隊友可以看：回到俯瞰整張地圖。
-                playerCamera.ClearTarget(transform);
-            }
-        }
-
-        /// <summary>不再看隊友（把那位隊友的身體顯示回來）。toIdle 為 true 時鏡頭回到俯瞰整張地圖。</summary>
-        void StopSpectating(bool toIdle)
-        {
-            PlayerCamera playerCamera = PlayerCamera.Instance;
-            if (m_Spectating != null)
-            {
-                m_Spectating.SetBodyHidden(false);
-                if (playerCamera != null)
-                {
-                    playerCamera.ClearTarget(m_Spectating.transform);
-                }
-            }
-
-            m_Spectating = null;
-            if (toIdle && playerCamera != null)
-            {
-                playerCamera.ClearTarget(transform);
-            }
-        }
-
-        bool IsWatchable(PlayerAvatar avatar)
-        {
-            return avatar != null && avatar != m_Avatar && avatar.IsSpawned && Roles.IsAnimal(avatar.AvatarRole.Value)
-                && avatar.Capture != null && avatar.Capture.State.Value != CaptureState.Out;
-        }
-
-        /// <summary>照玩家編號排，找 current 的下一位可以看的隊友（繞一圈）。</summary>
-        PlayerAvatar NextWatchable(PlayerAvatar current)
-        {
-            PlayerAvatar first = null;
-            PlayerAvatar after = null;
-            int currentNumber = current != null ? current.PlayerNumber : -1;
-            for (int i = 0; i < PlayerAvatar.All.Count; i++)
-            {
-                PlayerAvatar avatar = PlayerAvatar.All[i];
-                if (!IsWatchable(avatar))
-                {
-                    continue;
-                }
-
-                int number = avatar.PlayerNumber;
-                if (first == null || number < first.PlayerNumber)
-                {
-                    first = avatar;
-                }
-
-                if (number > currentNumber && (after == null || number < after.PlayerNumber))
-                {
-                    after = avatar;
-                }
-            }
-
-            return after ?? first;
         }
 
         void ServerBreakFree(bool byBump)
@@ -1215,7 +1261,8 @@ namespace AnimalEscape.Players
             return origin;
         }
 
-        static bool IsSpaceFree(Vector3 point, float radius, float height, int mask)
+        /// <summary>這個位置放不放得下一個這樣大小的角色（不碰到 mask 裡的任何東西）。</summary>
+        public static bool IsSpaceFree(Vector3 point, float radius, float height, int mask)
         {
             Vector3 bottom = point + Vector3.up * (radius + 0.08f);
             Vector3 top = point + Vector3.up * Mathf.Max(radius + 0.08f, height - radius);
@@ -1235,13 +1282,18 @@ namespace AnimalEscape.Players
                     // 被扛著時不需要碰撞，位置由 LateUpdate 直接擺到人類肩上。
                     m_Controller.enabled = false;
                 }
-                else if (previous == CaptureState.Carried || (previous == CaptureState.Caged && current == CaptureState.Free))
+                else if (previous == CaptureState.Carried || current == CaptureState.InLab || previous == CaptureState.InLab
+                    || (previous == CaptureState.Caged && current == CaptureState.Free))
                 {
-                    // 兩種情況要搬到主機指定的位置（DropPoint）：從肩上下來（放下、掙脫、關進籠子、出局），
-                    // 和被救出籠子（搬到籠子外面）。
+                    // 這幾種情況要搬到主機指定的位置（DropPoint）：從肩上下來（放下、掙脫、關進籠子），
+                    // 被救出籠子（搬到籠子外面），送進實驗室（從籠子或肩上），和被門禁卡放出實驗室（搬到門外）。
                     // 被扛著時是「躺在肩上」的姿勢（SnapToCarrier 在每台電腦各自擺的），放下來要扶正。
                     // 躺著時身體的「上」指向人類的背後，所以反方向就是人類面對的方向，落地後就朝那邊站好。
-                    Vector3 facing = previous == CaptureState.Carried ? -transform.up : transform.forward;
+                    // 從實驗室放出來時面向門外。
+                    LabRoom lab = LabRoom.Current;
+                    Vector3 facing = previous == CaptureState.Carried
+                        ? -transform.up
+                        : (previous == CaptureState.InLab && lab != null ? lab.doorOutward : transform.forward);
                     facing.y = 0f;
                     Quaternion upright = facing.sqrMagnitude > 0.001f
                         ? Quaternion.LookRotation(facing.normalized, Vector3.up)
@@ -1276,18 +1328,8 @@ namespace AnimalEscape.Players
                         transform.rotation = upright;
                     }
 
-                    m_Controller.enabled = current != CaptureState.Out;
+                    m_Controller.enabled = true;
                 }
-                else if (current == CaptureState.Out)
-                {
-                    m_Controller.enabled = false;
-                }
-            }
-
-            // 出局了就不再是自己鏡頭的主角；回到場上（重選身分會產生新的角色）時由新角色接手鏡頭。
-            if (IsOwner && previous == CaptureState.Out && current != CaptureState.Out)
-            {
-                StopSpectating(true);
             }
 
             RefreshVisuals();

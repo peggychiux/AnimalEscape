@@ -5,7 +5,8 @@ using UnityEngine.InputSystem;
 namespace AnimalEscape.Players
 {
     /// <summary>
-    /// 玩家的鏡頭。每台電腦只有一台，只跟著自己的角色；滑鼠（或手把右搖桿）轉視角。
+    /// 玩家的鏡頭。每台電腦只有一台，只跟著自己的角色；滑鼠（或手把右搖桿）轉視角，
+    /// ←→ 方向鍵也會左右轉（GameConfig.arrowKeyTurning，由 PlayerMovement 呼叫 AddYaw）。
     /// 視角依身分而不同（GameConfig 的 humanViewMode、animalViewMode）：
     /// - 人類預設第一人稱：鏡頭在眼睛的位置，看不到自己的身體（影子還在），身體會跟著視線轉。視野受限，動物才躲得掉。
     /// - 動物預設第三人稱：鏡頭跟在角色後上方，碰到牆會自動拉近。看得到自己，也能越過障礙物觀察四周。
@@ -134,6 +135,18 @@ namespace AnimalEscape.Players
         {
             m_Yaw = yaw;
             m_Pitch = ClampPitch(pitch);
+            m_TurnDuration = 0f;
+        }
+
+        /// <summary>方向鍵轉鏡頭（←→）：把鏡頭往右轉這麼多度（負的往左）。會中斷 LookTo 的平順轉動。</summary>
+        public void AddYaw(float degrees)
+        {
+            if (Mathf.Approximately(degrees, 0f))
+            {
+                return;
+            }
+
+            m_Yaw += degrees;
             m_TurnDuration = 0f;
         }
 

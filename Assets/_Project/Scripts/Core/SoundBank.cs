@@ -13,6 +13,7 @@ namespace AnimalEscape.Core
         static AudioClip s_Footstep;
         static AudioClip s_Bell;
         static AudioClip s_Cry;
+        static AudioClip s_Crash;
 
         /// <summary>人類的腳步聲：低沉的「咚」加一點沙沙的雜音。</summary>
         public static AudioClip Footstep
@@ -30,6 +31,22 @@ namespace AnimalEscape.Core
         public static AudioClip Cry
         {
             get { return s_Cry != null ? s_Cry : (s_Cry = Make("Cry", 0.5f, CrySample)); }
+        }
+
+        /// <summary>東西被弄倒：「哐啷」一聲，低沉的撞擊加上碎裂的雜音。</summary>
+        public static AudioClip Crash
+        {
+            get { return s_Crash != null ? s_Crash : (s_Crash = Make("Crash", 0.6f, CrashSample)); }
+        }
+
+        static float CrashSample(float t, System.Random random)
+        {
+            float thud = Mathf.Sin(2f * Mathf.PI * 55f * t) * Mathf.Exp(-t * 14f);
+            float noise = ((float)random.NextDouble() * 2f - 1f) * Mathf.Exp(-t * 9f) * 0.6f;
+            float clink = Mathf.Sin(2f * Mathf.PI * 1900f * t) * Mathf.Exp(-t * 22f) * 0.25f
+                + Mathf.Sin(2f * Mathf.PI * 2650f * (t - 0.08f)) * Mathf.Exp(-Mathf.Max(0f, t - 0.08f) * 25f) * (t > 0.08f ? 0.2f : 0f);
+            float attack = Mathf.Clamp01(t * 500f);
+            return (thud * 0.8f + noise + clink) * attack;
         }
 
         delegate float Sample(float t, System.Random random);

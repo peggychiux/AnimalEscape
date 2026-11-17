@@ -88,6 +88,13 @@ namespace AnimalEscape.Core
         public float mouseSensitivity = 0.12f;
         public float gamepadLookSpeed = 150f;
 
+        [Tooltip("方向鍵轉鏡頭（使用者 2026-11-17 決定，照《黎明死線》）：←→ 方向鍵轉鏡頭（和滑鼠左右轉一樣），↑↓ 前後走；"
+            + "WASD 照舊（A／D 橫著走）。關掉就回到原本的「方向鍵和 WASD 一樣是移動」。Play 中也可以直接切換。")]
+        public bool arrowKeyTurning = true;
+
+        [Tooltip("方向鍵轉鏡頭的速度（度／秒）")]
+        public float keyboardTurnSpeed = 160f;
+
         [Tooltip("第一人稱的視野角度（垂直方向，度）")]
         [Range(40f, 100f)] public float firstPersonFieldOfView = 70f;
 
@@ -198,8 +205,8 @@ namespace AnimalEscape.Core
         public float lockpickProtectRadius = 6f;
 
         [Header("捕捉籠與救援（M3，全部是初始值，待測試）")]
-        [Tooltip("第 1、2、3 次被關進籠子的倒數秒數。倒數歸零就出局。")]
-        public float[] cageSeconds = { 120f, 80f, 40f };
+        [Tooltip("第 1、2 次被關進籠子的倒數秒數。倒數歸零就送進實驗室；再被抓一次（第 3 次）直接送進實驗室。")]
+        public float[] cageSeconds = { 120f, 80f };
 
         [Tooltip("人類扛著動物，離籠子中心多近以內按 E 就會關進去（公尺）")]
         public float putInCageRange = 2.8f;
@@ -227,6 +234,91 @@ namespace AnimalEscape.Core
 
         [Tooltip("籠邊警報：人類離關著動物的籠子多近以內，動物們會收到「人類在 X 號籠附近」（公尺）")]
         public float cageAlarmRadius = 15f;
+
+        [Header("實驗室與門禁卡（全部是初始值，待試玩調整）")]
+        [Tooltip("門禁卡：自由的動物走到離卡片多近以內就撿起來（公尺）")]
+        public float keycardPickupRange = 1.2f;
+
+        [Tooltip("門禁卡掉在地上之後，過幾秒才撿得起來（免得掉下來的那一刻又被旁邊的人撿走）")]
+        public float keycardPickupDelay = 0.6f;
+
+        [Tooltip("拿著門禁卡在實驗室門口按住 E 幾秒，才刷得開")]
+        public float keycardSwipeSeconds = 5f;
+
+        [Tooltip("離實驗室門口（門外那一點）多近以內才刷得到卡（公尺）")]
+        public float keycardSwipeRange = 2.2f;
+
+        [Tooltip("刷開實驗室之後，被放出來的動物有幾秒保護（網子抓不到，只會變慢）")]
+        public float labReleaseProtectionSeconds = 5f;
+
+        [Tooltip("在實驗室裡，離大螢幕控台多近以內按 E 可以換人看（公尺）")]
+        public float labConsoleRange = 2.4f;
+
+        [Tooltip("踢球：球飛出去的速度＝撞上去的速度 x 這個倍率")]
+        public float ballKickStrength = 1.6f;
+
+        [Tooltip("踢球：另外往上抬的速度（公尺／秒）")]
+        public float ballKickLift = 2.5f;
+
+        [Tooltip("表情動作（數字鍵 1～4）播多久（秒）")]
+        public float emoteSeconds = 2.5f;
+
+        [Tooltip("表情動作在實驗室外面也能用嗎（目前只在實驗室派對裡用）")]
+        public bool emotesOutsideLab = false;
+
+        [Header("M4：比賽（全部是初始值，待試玩調整）")]
+        [Tooltip("一局最長幾秒（10 分鐘硬上限，到了貨車就開走）")]
+        public float matchSeconds = 600f;
+
+        [Tooltip("出口的門打開之後，貨車幾秒後開走")]
+        public float truckSeconds = 90f;
+
+        [Header("M4：混亂值與破壞（小／中／大）")]
+        [Tooltip("破壞一個東西加多少混亂值（％）：小、中、大")]
+        public float chaosSmall = 2f;
+        public float chaosMedium = 5f;
+        public float chaosLarge = 10f;
+
+        [Tooltip("破壞的聲音，人類在多遠以內聽得到（公尺）：小、中、大")]
+        public float breakHearSmall = 15f;
+        public float breakHearMedium = 25f;
+        public float breakHearLarge = 40f;
+
+        [Tooltip("要按住幾秒才弄得倒（小東西是按一下）：中、大")]
+        public float breakSecondsMedium = 1.5f;
+        public float breakSecondsLarge = 3f;
+
+        [Tooltip("離東西的邊緣多近以內才碰得到（公尺）")]
+        public float breakRange = 1.2f;
+
+        [Tooltip("動物在多遠以內看得到「可以弄倒」的橘色標記（公尺）；被牆、樹籬擋住的不顯示")]
+        public float breakMarkerRange = 18f;
+
+        [Tooltip("人類也看得到可以弄倒的東西的標記（預設只有動物看得到）")]
+        public bool breakMarkersForHuman = false;
+
+        [Header("M4：保全控制台（人類）")]
+        [Tooltip("人類在控制台按住 E 幾秒重開系統")]
+        public float consoleSeconds = 5f;
+
+        [Tooltip("重開一次，混亂值降多少（％）")]
+        public float consoleChaosReduction = 15f;
+
+        [Tooltip("同一台控制台用過之後，幾秒後才能再用")]
+        public float consoleCooldown = 60f;
+
+        [Tooltip("離控制台中心多近以內才能操作（公尺）")]
+        public float consoleRange = 1.8f;
+
+        [Header("M4：出口與貨車")]
+        [Tooltip("混亂值滿了之後，一隻動物在出口按住 E 要幾秒才打得開")]
+        public float exitOpenSeconds = 10f;
+
+        [Tooltip("每多一隻動物一起按，開門速度多快幾成（0.5 表示兩隻是 1.5 倍、三隻是 2 倍）")]
+        public float exitHelperBonus = 0.5f;
+
+        [Tooltip("站在出口門前多深以內才算在開門（公尺，從牆面往地圖裡量）")]
+        public float exitReach = 2.6f;
 
         [Header("聲音（全部是初始值，待試玩調整）")]
         [Tooltip("人類跑步的腳步聲，動物在多遠以內聽得到（公尺）")]
@@ -294,7 +386,7 @@ namespace AnimalEscape.Core
             }
         }
 
-        /// <summary>第幾次被關（從 1 開始）的倒數秒數；超過設定的次數就是 0（表示直接出局）。</summary>
+        /// <summary>第幾次被關（從 1 開始）的倒數秒數；超過設定的次數就是 0（表示直接送進實驗室）。</summary>
         public float GetCageSeconds(int timesCaged)
         {
             if (cageSeconds == null || timesCaged < 1 || timesCaged > cageSeconds.Length)
@@ -305,7 +397,7 @@ namespace AnimalEscape.Core
             return cageSeconds[timesCaged - 1];
         }
 
-        /// <summary>最多可以被關幾次；再被抓一次就直接出局（預設 3 次，第 4 次出局）。</summary>
+        /// <summary>最多可以被關進籠子幾次；再被抓一次就直接送進實驗室（預設 2 次，第 3 次進實驗室）。</summary>
         public int MaxTimesCaged
         {
             get { return cageSeconds != null ? cageSeconds.Length : 0; }
@@ -353,6 +445,24 @@ namespace AnimalEscape.Core
                 default:
                     return 0f;
             }
+        }
+
+        /// <summary>破壞這種大小的東西加多少混亂值（％）。</summary>
+        public float GetChaos(BreakSize size)
+        {
+            return size == BreakSize.Large ? chaosLarge : (size == BreakSize.Medium ? chaosMedium : chaosSmall);
+        }
+
+        /// <summary>破壞這種大小的東西，人類在多遠以內聽得到（公尺）。</summary>
+        public float GetBreakHearRange(BreakSize size)
+        {
+            return size == BreakSize.Large ? breakHearLarge : (size == BreakSize.Medium ? breakHearMedium : breakHearSmall);
+        }
+
+        /// <summary>要按住幾秒才弄得倒；0 表示按一下就倒（小東西）。</summary>
+        public float GetBreakSeconds(BreakSize size)
+        {
+            return size == BreakSize.Large ? breakSecondsLarge : (size == BreakSize.Medium ? breakSecondsMedium : 0f);
         }
 
         static GameConfig s_Instance;

@@ -15,6 +15,14 @@ namespace AnimalEscape.Core
         Turtle = 5
     }
 
+    /// <summary>可以破壞的東西的大小（M4）：決定加多少混亂值、聲音傳多遠、要按多久。</summary>
+    public enum BreakSize : byte
+    {
+        Small = 0,
+        Medium = 1,
+        Large = 2
+    }
+
     /// <summary>
     /// 一個身分的可調數值。實際數值放在 GameConfig 裡。
     /// </summary>

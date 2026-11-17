@@ -38,6 +38,7 @@ namespace AnimalEscape.EditorTools
         const string k_SlotPrefabPath = k_PrefabsDir + "/PlayerSlot.prefab";
         const string k_AvatarPrefabPath = k_PrefabsDir + "/Avatar.prefab";
         const string k_MatchStatePrefabPath = k_PrefabsDir + "/MatchState.prefab";
+        const string k_LabBallPrefabPath = k_PrefabsDir + "/LabBall.prefab";
         const string k_ConfigPath = k_ConfigResourcesDir + "/GameConfig.asset";
         const string k_PrefabListPath = k_ConfigDir + "/NetworkPrefabs.asset";
         const string k_PipelinePath = k_SettingsDir + "/URP_Pipeline.asset";
@@ -96,6 +97,21 @@ namespace AnimalEscape.EditorTools
             public Material GateMesh;
             public Material Lock;
             public Material CaptureCage;
+            public Material LabWall;
+            public Material LabDoor;
+            public Material Party;
+            public Material PartyRug;
+            public Material Screen;
+            public Material Lamp;
+            public Material Keycard;
+            public Material Ball;
+            public Material BallStripe;
+            public Material ConsoleBody;
+            public Material ConsoleScreen;
+            public Material Pot;
+            public Material Bucket;
+            public Material Truck;
+            public Material TruckFloor;
             public readonly Dictionary<Role, Material> Roles = new Dictionary<Role, Material>();
         }
 
@@ -183,12 +199,14 @@ namespace AnimalEscape.EditorTools
 
                 GameObject slotPrefab = BuildSlotPrefab();
                 GameObject avatarPrefab = BuildAvatarPrefab(config, palette);
-                GameObject matchStatePrefab = BuildMatchStatePrefab();
-                NetworkPrefabsList prefabList = BuildPrefabList(slotPrefab, avatarPrefab, matchStatePrefab);
+                GameObject ballPrefab = BuildLabBallPrefab(palette);
+                GameObject matchStatePrefab = BuildMatchStatePrefab(ballPrefab);
+                NetworkPrefabsList prefabList = BuildPrefabList(slotPrefab, avatarPrefab, matchStatePrefab, ballPrefab);
 
                 BuildLighting();
                 BuildCamera();
                 MapInfo[] maps = BuildMaps(palette);
+                BuildKeycard(palette);
                 BuildNetwork(prefabList);
                 BuildGame(slotPrefab, avatarPrefab, matchStatePrefab, maps);
 
@@ -318,6 +336,16 @@ namespace AnimalEscape.EditorTools
             {
                 // 數值維持原樣，只是讓檔案重新存一次：程式新增或移除欄位之後，檔案內容才會跟著更新。
                 EditorUtility.SetDirty(config);
+
+                // 規則改了的地方（不是調整數值）才改檔案裡的值：
+                // 2026-11-17 使用者決定「第 3 次被抓就送進實驗室」，籠子倒數從 120／80／40 改成 120／80。
+                if (config.cageSeconds != null && config.cageSeconds.Length == 3
+                    && Mathf.Approximately(config.cageSeconds[0], 120f) && Mathf.Approximately(config.cageSeconds[1], 80f)
+                    && Mathf.Approximately(config.cageSeconds[2], 40f))
+                {
+                    config.cageSeconds = new[] { 120f, 80f };
+                    Debug.Log("[PrototypeBuilder] 籠子倒數改成 120／80 秒（第 3 次被抓直接送進實驗室）。");
+                }
             }
 
             return config;
@@ -359,6 +387,25 @@ namespace AnimalEscape.EditorTools
             MakeTransparent(palette.GateMesh);
             palette.Lock = EnsureMaterial("Lock", new Color(0.98f, 0.78f, 0.12f), usingUrp);
             palette.CaptureCage = EnsureMaterial("CaptureCage", new Color(0.86f, 0.24f, 0.22f), usingUrp);
+
+            // 實驗室：淡紫色的牆、亮紫色的派對地板；大螢幕、讀卡機的燈、門禁卡用不受光影響的材質（暗處也看得清楚）。
+            palette.LabWall = EnsureMaterial("LabWall", new Color(0.62f, 0.58f, 0.70f), usingUrp);
+            palette.LabDoor = EnsureMaterial("LabDoor", new Color(0.34f, 0.36f, 0.42f), usingUrp);
+            palette.Party = EnsureMaterial("FloorParty", new Color(0.55f, 0.38f, 0.72f), usingUrp);
+            palette.PartyRug = EnsureMaterial("PartyRug", new Color(0.95f, 0.72f, 0.30f), usingUrp);
+            palette.Screen = EnsureUnlitMaterial("LabScreen", new Color(0.06f, 0.07f, 0.09f), usingUrp);
+            palette.Lamp = EnsureUnlitMaterial("ReaderLamp", new Color(0.95f, 0.18f, 0.15f), usingUrp);
+            palette.Keycard = EnsureUnlitMaterial("Keycard", new Color(0.30f, 0.95f, 1f), usingUrp);
+            palette.Ball = EnsureMaterial("PartyBall", new Color(0.98f, 0.40f, 0.62f), usingUrp);
+            palette.BallStripe = EnsureMaterial("PartyBallStripe", new Color(1f, 0.92f, 0.35f), usingUrp);
+
+            // M4：保全控制台、可以破壞的東西、貨車
+            palette.ConsoleBody = EnsureMaterial("ConsoleBody", new Color(0.24f, 0.27f, 0.33f), usingUrp);
+            palette.ConsoleScreen = EnsureUnlitMaterial("ConsoleScreen", new Color(0.25f, 0.95f, 0.45f), usingUrp);
+            palette.Pot = EnsureMaterial("Pot", new Color(0.78f, 0.42f, 0.28f), usingUrp);
+            palette.Bucket = EnsureMaterial("Bucket", new Color(0.95f, 0.78f, 0.25f), usingUrp);
+            palette.Truck = EnsureMaterial("Truck", new Color(0.88f, 0.90f, 0.92f), usingUrp);
+            palette.TruckFloor = EnsureMaterial("TruckFloor", new Color(0.42f, 0.33f, 0.25f), usingUrp);
 
             foreach (Role role in Roles.Selectable)
             {
@@ -404,6 +451,38 @@ namespace AnimalEscape.EditorTools
             if (shader == null)
             {
                 throw new System.InvalidOperationException("找不到可用的著色器（URP Lit 與 Standard 都不存在）。");
+            }
+
+            material = new Material(shader);
+            material.color = color;
+            AssetDatabase.CreateAsset(material, path);
+            return material;
+        }
+
+        /// <summary>
+        /// 不受光影響的材質（URP Unlit；沒有 URP 時用內建的 Unlit/Texture）：大螢幕的畫面、讀卡機的燈、門禁卡。
+        /// 已經存在的材質只更新顏色。
+        /// </summary>
+        static Material EnsureUnlitMaterial(string name, Color color, bool usingUrp)
+        {
+            string path = k_MaterialsDir + "/" + name + ".mat";
+            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (material != null)
+            {
+                material.color = color;
+                EditorUtility.SetDirty(material);
+                return material;
+            }
+
+            Shader shader = usingUrp ? Shader.Find("Universal Render Pipeline/Unlit") : null;
+            if (shader == null)
+            {
+                shader = Shader.Find("Unlit/Texture");
+            }
+
+            if (shader == null)
+            {
+                return EnsureMaterial(name, color, usingUrp);
             }
 
             material = new Material(shader);
@@ -468,12 +547,56 @@ namespace AnimalEscape.EditorTools
             return SaveAsPrefab(root, k_SlotPrefabPath);
         }
 
-        static GameObject BuildMatchStatePrefab()
+        static GameObject BuildMatchStatePrefab(GameObject ballPrefab)
         {
             var root = new GameObject("MatchState");
             root.AddComponent<NetworkObject>();
-            root.AddComponent<MatchState>();
+            root.AddComponent<MatchState>().labBallPrefab = ballPrefab;
+            root.AddComponent<MatchFlow>();
             return SaveAsPrefab(root, k_MatchStatePrefabPath);
+        }
+
+        /// <summary>
+        /// 實驗室派對的球：直徑 0.7 公尺的粉紅色球，一圈黃色的帶子（看得出在滾）。
+        /// 物理只在主機算（NetworkRigidbody 會把其他電腦上的剛體設成不受物理影響、照同步的位置擺）。
+        /// </summary>
+        static GameObject BuildLabBallPrefab(Palette palette)
+        {
+            const float radius = 0.35f;
+            var root = new GameObject("LabBall");
+            root.AddComponent<SphereCollider>().radius = radius;
+
+            var body = root.AddComponent<Rigidbody>();
+            body.mass = 0.4f;
+            body.linearDamping = 0.35f;
+            body.angularDamping = 0.6f;
+            body.interpolation = RigidbodyInterpolation.Interpolate;
+            body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+            root.AddComponent<NetworkObject>();
+            var networkTransform = root.AddComponent<NetworkTransform>();
+            networkTransform.AuthorityMode = NetworkTransform.AuthorityModes.Server;
+            networkTransform.SyncScaleX = false;
+            networkTransform.SyncScaleY = false;
+            networkTransform.SyncScaleZ = false;
+            root.AddComponent<NetworkRigidbody>();
+            root.AddComponent<LabBall>().radius = radius;
+
+            GameObject ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            ball.name = "Ball";
+            ball.transform.SetParent(root.transform, false);
+            ball.transform.localScale = Vector3.one * radius * 2f;
+            ball.GetComponent<Renderer>().sharedMaterial = palette.Ball;
+            RemoveCollider(ball);
+
+            GameObject stripe = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            stripe.name = "Stripe";
+            stripe.transform.SetParent(root.transform, false);
+            stripe.transform.localScale = new Vector3(radius * 2.04f, radius * 0.55f, radius * 2.04f);
+            stripe.GetComponent<Renderer>().sharedMaterial = palette.BallStripe;
+            RemoveCollider(stripe);
+
+            return SaveAsPrefab(root, k_LabBallPrefabPath);
         }
 
         static GameObject BuildAvatarPrefab(GameConfig config, Palette palette)
@@ -500,12 +623,16 @@ namespace AnimalEscape.EditorTools
             networkTransform.SyncRotAngleX = false;
             networkTransform.SyncRotAngleZ = false;
 
-            // PlayerAvatar 要排在 PlayerMovement 前面；PlayerCapture（追與抓）、PlayerLockpick（撬鎖）排後面。
+            // PlayerAvatar 要排在 PlayerMovement 前面；PlayerCapture（追與抓）、PlayerLockpick（撬鎖）、PlayerRescue（救援）、
+            // PlayerKeycard（刷門禁卡）、PlayerParty（實驗室派對：表情、踢球、大螢幕）排後面。
             root.AddComponent<PlayerAvatar>();
             root.AddComponent<PlayerMovement>();
             root.AddComponent<PlayerCapture>();
             root.AddComponent<PlayerLockpick>();
             root.AddComponent<PlayerRescue>();
+            root.AddComponent<PlayerKeycard>();
+            root.AddComponent<PlayerParty>();
+            root.AddComponent<PlayerTask>();
 
             foreach (Role role in Roles.Selectable)
             {
@@ -723,18 +850,18 @@ namespace AnimalEscape.EditorTools
         // 收容區（開場越獄）：每張地圖有三個有頂的大籠子（BuildHabitat，給範圍就自動蓋好），開場時動物關在裡面，
         // 要到黃色的門邊按住 E 撬鎖才出得來：兔子在籠舍區旁的柵欄、猴子在育苗區旁罩著樹林的大籠子、
         // 浣熊在倉庫旁的置物籠。烏龜沒有被關，直接出生在池塘裡。人類從研究室出發。
+        //
+        // 實驗室（BuildLabRoom）：每張地圖一間，佔研究室靠外牆的那個角落（位置 2026-11-17 和使用者確認過）。
+        // 不透明的牆和屋頂、一道刷卡的門；籠子倒數歸零或第 3 次被抓的動物送進來開派對。
+        // 門禁卡有 3 個候選位置（離實驗室遠的地方），每次重新開始時隨機挑一個。
         // 執行時同一時間只開一張地圖，由 MapRegistry 切換。要改格局就改對應的 BuildMapXxx。
         // ------------------------------------------------------------------
 
         static MapInfo[] BuildMaps(Palette palette)
         {
-            // 三張地圖共用的地板與外牆
+            // 三張地圖共用的地板。外牆每張地圖自己蓋（出口開在不同的牆上，見 BuildOuterWalls）。
             Transform shared = new GameObject("Level Shared").transform;
             CreateBlock(shared, "Floor", new Vector3(0f, -0.5f, 0f), new Vector3(80.6f, 1f, 60.6f), palette.Floor);
-            WallAlongX(shared, "Outer North", 30f, -40.15f, 40.15f, palette.OuterWall);
-            WallAlongX(shared, "Outer South", -30f, -40.15f, 40.15f, palette.OuterWall);
-            WallAlongZ(shared, "Outer West", -40f, -30f, 30f, palette.OuterWall);
-            WallAlongZ(shared, "Outer East", 40f, -30f, 30f, palette.OuterWall);
 
             Transform mapsRoot = new GameObject("Maps").transform;
             var maps = new[]
@@ -755,6 +882,9 @@ namespace AnimalEscape.EditorTools
 
         static MapInfo NewMap(Transform mapsRoot, string objectName, string displayName, string summary)
         {
+            // 這張地圖的可以破壞的東西，從這裡開始收集（設施區積木、植栽箱和樹旁邊會自動加），地圖蓋完時由 FinishBreakables 一次放好。
+            s_Breakables.Clear();
+            s_CollectDecor = true;
             var root = new GameObject(objectName);
             root.transform.SetParent(mapsRoot, false);
             return new MapInfo { displayName = displayName, summary = summary, root = root };
@@ -835,7 +965,7 @@ namespace AnimalEscape.EditorTools
 
             // 四個角落的設施區。西北、西南、東南各讓出一塊給收容區。
             BuildCages(root, "Cages", -38f, -28f, 14f, 28.5f, palette);
-            BuildLab(root, "Lab", 18f, 38f, 14f, 28.5f, palette);
+            BuildLab(root, "Lab", 18f, 29.5f, 14f, 28.5f, palette);
             BuildNursery(root, "Nursery", -38f, -28f, -28.5f, -14f, palette);
             BuildWarehouse(root, "Warehouse", 24.5f, 36f, -28.5f, -14f, palette);
 
@@ -845,11 +975,13 @@ namespace AnimalEscape.EditorTools
             BuildHabitat(map, habitats, "Monkey Grove", Role.Monkey, -26.5f, -18f, -28f, -15f, k_GroveHeight, Side.East, palette.Grass, palette);
             BuildHabitat(map, habitats, "Raccoon Locker", Role.Raccoon, 18f, 23f, -28f, -22f, k_PenHeight, Side.North, palette.Concrete, palette);
             AddSpawn(map, Role.Turtle, -4.1f, -3.25f, 270f);
-            ExitOnEastWall(root, "Truck Exit", -24f, -18f, palette);
+            // 出口在北牆正中間（離三個收容區都遠），門外停著貨車。
+            BuildOuterWalls(root, Side.North, 0f, palette);
+            BuildExit(root, Side.North, 0f, palette);
 
-            // 四邊中段：零星的掩體
+            // 四邊中段：零星的掩體（三階台階原本在北牆中間，出口搬過去之後往西挪）
             Transform edges = Group(root, "Edges");
-            Steps(edges, "Steps", 0f, 26.5f, palette);
+            Steps(edges, "Steps", -12f, 26.5f, palette);
             Crate(edges, "North Crate 1", -9f, 20f, 1f, palette);
             Crate(edges, "North Crate 2", 10f, 18.5f, 1.5f, palette);
             CreateTable(edges, "South Table", new Vector3(-6f, 0f, -22f), palette);
@@ -864,6 +996,14 @@ namespace AnimalEscape.EditorTools
             Bush(edges, "East Hedge", 24.5f, 0f, 4f, 1.2f, 90f, palette);
 
             BuildCaptureCages(root, palette, new Vector2(0f, 7f), new Vector2(8f, 22.5f), new Vector2(4f, -23f), new Vector2(-33f, 0f), new Vector2(33f, 0f));
+
+            // 實驗室在研究室的東北角，門朝西；門禁卡在西邊和南邊。
+            BuildLabRoom(root, 30.5f, 39.85f, 18f, 29.85f, Side.West, 21.5f, palette,
+                new Vector2(-36f, 11f), new Vector2(-12f, -27f), new Vector2(0f, -12.5f));
+
+            // 保全控制台（人類用）：東北、西、南各一台。
+            BuildConsoles(root, palette, new Vector2(24f, 13f), new Vector2(-36f, -10.5f), new Vector2(14f, -27f));
+            FinishBreakables(root, palette);
 
             // 人類從東北角的研究室出發（站在實驗島之間的走道上，面向西南）。
             AddSpawn(map, Role.Human, 28f, 21.25f, 225f);
@@ -931,7 +1071,7 @@ namespace AnimalEscape.EditorTools
 
             // 北側：研究室（西）、籠舍區（東）；南側：育苗區（西）、倉庫（東）。
             // 研究室放西邊，人類出生點才不會緊鄰東端的水池（烏龜的出生點）。
-            BuildLab(root, "Lab", -38f, -4.5f, 12.5f, 28.5f, palette);
+            BuildLab(root, "Lab", -29.5f, -4.5f, 12.5f, 28.5f, palette);
             BuildCages(root, "Cages", 4.5f, 27.5f, 12.5f, 28.5f, palette);
             BuildNursery(root, "Nursery", -38f, -17f, -28.5f, -12.5f, palette);
             BuildWarehouse(root, "Warehouse", 11.5f, 38f, -28.5f, -12.5f, palette);
@@ -942,7 +1082,9 @@ namespace AnimalEscape.EditorTools
             BuildHabitat(map, habitats, "Monkey Grove", Role.Monkey, -15.5f, -5f, -28f, -13.5f, k_GroveHeight, Side.North, palette.Grass, palette);
             BuildHabitat(map, habitats, "Raccoon Locker", Role.Raccoon, 5f, 10f, -28f, -22f, k_PenHeight, Side.North, palette.Concrete, palette);
             AddSpawn(map, Role.Turtle, 27.1f, 0f, 270f);
-            ExitOnSouthWall(root, "Truck Exit", 26f, 32f, palette);
+            // 出口在西牆南段（離三個收容區都遠），門外停著貨車。
+            BuildOuterWalls(root, Side.West, -6f, palette);
+            BuildExit(root, Side.West, -6f, palette);
 
             // 南北兩側中間的通道
             Transform middle = Group(root, "Middle");
@@ -953,6 +1095,14 @@ namespace AnimalEscape.EditorTools
 
             // 籠子南北交錯（使用者 2026-11-17：原本三個排在花園中線上「太過一直線」）。
             BuildCaptureCages(root, palette, new Vector2(-35f, 4f), new Vector2(-16.5f, -1f), new Vector2(1.5f, -8.5f), new Vector2(0f, 15.5f), new Vector2(35.5f, -4f));
+
+            // 實驗室在研究室的西北角，門朝東；門禁卡在東邊和南邊。
+            BuildLabRoom(root, -39.85f, -30.5f, 18f, 29.85f, Side.East, 21.5f, palette,
+                new Vector2(37f, 9f), new Vector2(0f, -26f), new Vector2(24f, -8f));
+
+            // 保全控制台：研究室前、猴子籠北邊的花園邊、水池北岸（西南那台從草稿的 (-36,-8) 挪開，原本緊貼出口）。
+            BuildConsoles(root, palette, new Vector2(-8f, 14f), new Vector2(-14f, -11.5f), new Vector2(18f, 8.5f));
+            FinishBreakables(root, palette);
 
             // 人類從西北的研究室出發（站在實驗島之間的走道上，面向東南）。
             AddSpawn(map, Role.Human, -21.25f, 20.5f, 135f);
@@ -998,7 +1148,7 @@ namespace AnimalEscape.EditorTools
             // 散落的設施「島」
             BuildNursery(root, "Nursery", -37f, -27.5f, 15f, 28f, palette);
             BuildCages(root, "Cages", 14f, 27.5f, 13f, 28f, palette);
-            BuildLab(root, "Lab", -37.5f, -14f, -25f, -9f, palette);
+            BuildLab(root, "Lab", -29.5f, -14f, -25f, -9f, palette);
             BuildWarehouse(root, "Warehouse", 22.5f, 35.5f, -28.5f, -19.5f, palette);
 
             // 收容區：猴子在育苗區東邊、兔子在籠舍區東邊、浣熊在倉庫西邊；烏龜泡在東南的水池。
@@ -1007,7 +1157,9 @@ namespace AnimalEscape.EditorTools
             BuildHabitat(map, habitats, "Rabbit Pen", Role.Rabbit, 29f, 37.5f, 15.5f, 27.5f, k_PenHeight, Side.South, palette.Straw, palette);
             BuildHabitat(map, habitats, "Raccoon Locker", Role.Raccoon, 16f, 21f, -28f, -22f, k_PenHeight, Side.North, palette.Concrete, palette);
             AddSpawn(map, Role.Turtle, 25f, -14.5f, 270f);
-            ExitOnEastWall(root, "Truck Exit", -27f, -21f, palette);
+            // 出口在西牆正中間（離三個收容區都遠），門外停著貨車。
+            BuildOuterWalls(root, Side.West, 0f, palette);
+            BuildExit(root, Side.West, 0f, palette);
 
             // 花園：歪歪斜斜的樹籬、植栽箱和樹，沒有一條路是直的。
             Transform garden = Group(root, "Garden");
@@ -1040,6 +1192,14 @@ namespace AnimalEscape.EditorTools
             Crate(garden, "Crate E", 27f, -5f, 1.5f, palette);
 
             BuildCaptureCages(root, palette, new Vector2(0f, 19.5f), new Vector2(9f, 0.5f), new Vector2(26.5f, 0.5f), new Vector2(-20.5f, -1.5f), new Vector2(6.5f, -18.5f));
+
+            // 實驗室在研究室的西南角，門朝東；門禁卡在東邊、北邊和南邊。
+            BuildLabRoom(root, -39.85f, -30.5f, -29.85f, -18f, Side.East, -24f, palette,
+                new Vector2(36f, 5f), new Vector2(5f, 27f), new Vector2(4f, -27f));
+
+            // 保全控制台：研究室東邊、南邊、北邊（前兩台從草稿位置挪開：原本一台壓在實驗台上、一台和門禁卡疊在一起）。
+            BuildConsoles(root, palette, new Vector2(-12f, -11f), new Vector2(-2f, -27f), new Vector2(11f, 25.5f));
+            FinishBreakables(root, palette);
 
             // 人類從西南的研究室出發（站在實驗島之間的走道上，面向東北）。
             AddSpawn(map, Role.Human, -23f, -17f, 45f);
@@ -1076,19 +1236,28 @@ namespace AnimalEscape.EditorTools
                     float x = startX + i * 2.4f;
                     CreateTable(rowGroup, "Bench " + (i + 1), new Vector3(x, 0f, z), palette);
 
-                    // 一半的桌上有盆栽（高度加起來 1.4 公尺，人類還是看得過去）
+                    // 一半的桌上有盆栽（高度加起來 1.4 公尺，人類還是看得過去）；另一半放一個小花盆，可以弄倒。
                     if ((row + i) % 2 == 0)
                     {
                         CreateBlock(rowGroup, "Plants " + (i + 1), new Vector3(x, 1.175f, z), new Vector3(2f, 0.45f, 0.8f), palette.Plant);
                     }
+                    else
+                    {
+                        AddBreakable(BreakKind.Pot, new Vector3(x, 0.95f, z), 0f);
+                    }
                 }
 
-                // 每隔一條走道，在走道中間放一個高植栽架擋視線（兩側各留約 1.3 公尺可以走）。
+                // 每隔一條走道，在走道中間放一個高植栽架擋視線（兩側各留約 1.3 公尺可以走）；
+                // 其他走道的中間放一台澆水推車（中東西，可以推倒）。
                 bool hasNextRow = z - 4.5f >= zMin + 1.19f;
                 if (row % 2 == 0 && hasNextRow)
                 {
                     float rackX = Mathf.Lerp(xMin, xMax, row % 4 == 0 ? 0.3f : 0.7f);
                     Rack(zone, "Plant Rack " + (row + 1), rackX, z - 2.25f, palette);
+                }
+                else if (hasNextRow)
+                {
+                    AddBreakable(BreakKind.Cart, new Vector3((xMin + xMax) * 0.5f, 0f, z - 2.25f), 0f);
                 }
 
                 row++;
@@ -1142,6 +1311,11 @@ namespace AnimalEscape.EditorTools
                     {
                         CreateBlock(rowGroup, "Roof " + (i + 1), new Vector3(middleX, 0.9f, middleZ),
                             new Vector3(stall, 0.1f, stall), palette.Wall);
+                    }
+                    else if (i % 3 == 0)
+                    {
+                        // 沒有頂蓋的隔間裡放一個飼料桶（小東西）。
+                        AddBreakable(BreakKind.Bucket, new Vector3(middleX, 0f, middleZ + 0.4f), 0f);
                     }
                 }
 
@@ -1203,12 +1377,25 @@ namespace AnimalEscape.EditorTools
                             // 實驗台上的水槽：加起來 1.5 公尺高，人類還是看得過去，小動物躲在後面就看不到了。
                             CreateBlock(zone, "Lab Tank " + label, new Vector3(x, 1.225f, z + (row % 2 == 0 ? -1f : 1f)), new Vector3(0.9f, 0.55f, 1.8f), palette.Tank);
                         }
+
+                        // 實驗台的另一端：一組燒杯（小）和一台電腦螢幕（中），都可以弄倒。
+                        float side = row % 2 == 0 ? 1f : -1f;
+                        AddBreakable(BreakKind.Beakers, new Vector3(x, 0.95f, z + side * 1.9f), 0f);
+                        AddBreakable(BreakKind.Monitor, new Vector3(x, 0.95f, z + side * 0.6f), 90f);
                     }
                     else
                     {
                         TallCabinet(zone, "Lab Cabinet " + label, x, z, length, false, column % 2 == 1, palette.Wall, palette);
                     }
                 }
+            }
+
+            // 第一、二排之間的走道上，放一台實驗機器（大東西，要按住才推得倒）。
+            if (rowCenters.Count >= 2 && columns >= 2)
+            {
+                float machineX = startX + spacing * (columns - 1.5f);
+                float machineZ = (rowCenters[0] + rowCenters[1]) * 0.5f;
+                AddBreakable(BreakKind.Machine, new Vector3(machineX, 0f, machineZ), 0f);
             }
         }
 
@@ -1228,12 +1415,14 @@ namespace AnimalEscape.EditorTools
                 ShelfSpan(zone, "Shelf " + (row + 1) + "A", xMin + 0.5f, gapCenter - 1.25f, z, row % 2 == 1, palette);
                 ShelfSpan(zone, "Shelf " + (row + 1) + "B", gapCenter + 1.25f, xMax - 0.5f, z, row % 2 == 0, palette);
 
-                // 走道裡零星的箱子
+                // 走道裡零星的箱子；貨架腳邊一堆紙箱（中東西）、走道另一頭幾罐油漆（小東西），都可以弄倒。
                 bool hasNextRow = z - 4.5f >= zMin + 1.49f;
                 if (hasNextRow)
                 {
                     float crateX = Mathf.Lerp(xMin, xMax, row % 2 == 0 ? 0.8f : 0.2f);
                     Crate(zone, "Aisle Crate " + (row + 1), crateX, z - 2.25f, row % 2 == 0 ? 1f : 1.5f, palette);
+                    AddBreakable(BreakKind.Boxes, new Vector3(Mathf.Lerp(xMin, xMax, row % 2 == 0 ? 0.15f : 0.85f), 0f, z - 1.05f), 0f);
+                    AddBreakable(BreakKind.Paint, new Vector3(Mathf.Lerp(xMin, xMax, row % 2 == 0 ? 0.55f : 0.45f), 0f, z - 3.5f), 0f);
                 }
 
                 row++;
@@ -1312,6 +1501,525 @@ namespace AnimalEscape.EditorTools
         }
 
         // ------------------------------------------------------------------
+        // M4：外牆與出口、貨車、保全控制台、可以破壞的東西
+        // ------------------------------------------------------------------
+
+        const float k_ExitWidth = 6f;
+        const float k_ExitHeight = 2.6f;
+        const float k_TruckEntranceHeight = 1.2f;
+
+        /// <summary>
+        /// 這張地圖的外牆（80 x 60 公尺），出口那一面在 exitAlong 留一個 6 公尺寬、2.6 公尺高的門洞。
+        /// 外牆原本三張地圖共用，出口搬到不同的牆之後改成每張地圖自己蓋。
+        /// </summary>
+        static void BuildOuterWalls(Transform mapRoot, Side exitSide, float exitAlong, Palette palette)
+        {
+            Transform walls = Group(mapRoot, "Outer Walls");
+            var exit = new Opening { Center = exitAlong, Width = k_ExitWidth, Height = k_ExitHeight };
+            var none = new Opening[0];
+            WallAlongX(walls, "Outer North", 30f, -40.15f, 40.15f, palette.OuterWall, exitSide == Side.North ? new[] { exit } : none);
+            WallAlongX(walls, "Outer South", -30f, -40.15f, 40.15f, palette.OuterWall, exitSide == Side.South ? new[] { exit } : none);
+            WallAlongZ(walls, "Outer West", -40f, -30f, 30f, palette.OuterWall, exitSide == Side.West ? new[] { exit } : none);
+            WallAlongZ(walls, "Outer East", 40f, -30f, 30f, palette.OuterWall, exitSide == Side.East ? new[] { exit } : none);
+        }
+
+        /// <summary>
+        /// 出口（M4）：外牆門洞裡的大門（橘色，混亂值滿了之後動物合作打開），門外停著貨車。
+        /// 貨車車廂 7 x 7.6 公尺、有車頂，入口上緣只有 1.2 公尺高：動物都鑽得進去（猴子 0.9 公尺），人類（1.8 公尺）進不去。
+        /// 走進車廂（入口的橫梁後面）就算上了貨車。BuildOuterWalls 要在同一面牆、同一個位置留門洞。
+        /// </summary>
+        static void BuildExit(Transform mapRoot, Side side, float along, Palette palette)
+        {
+            Vector3 point;
+            Vector3 outward;
+            switch (side)
+            {
+                case Side.North:
+                    point = new Vector3(along, 0f, 30f);
+                    outward = Vector3.forward;
+                    break;
+                case Side.South:
+                    point = new Vector3(along, 0f, -30f);
+                    outward = Vector3.back;
+                    break;
+                case Side.East:
+                    point = new Vector3(40f, 0f, along);
+                    outward = Vector3.right;
+                    break;
+                default:
+                    point = new Vector3(-40f, 0f, along);
+                    outward = Vector3.left;
+                    break;
+            }
+
+            Transform exit = Pivot(mapRoot, "Exit", point.x, point.z, Quaternion.LookRotation(outward).eulerAngles.y);
+            var door = exit.gameObject.AddComponent<ExitDoor>();
+            door.width = k_ExitWidth;
+            door.blocker = SolidCollider(exit, "Door Blocker", new Vector3(0f, k_ExitHeight * 0.5f, 0f),
+                new Vector3(k_ExitWidth, k_ExitHeight, k_WallThickness)).GetComponent<Collider>();
+            GameObject panel = CreateBlock(exit, "Door Panel", new Vector3(0f, k_ExitHeight * 0.5f, 0f),
+                new Vector3(k_ExitWidth - 0.04f, k_ExitHeight - 0.04f, 0.16f), palette.Exit);
+            RemoveCollider(panel);
+            door.doorPanel = panel.transform;
+
+            // 門框、門上的燈（鎖著紅、解鎖黃、打開綠）、門前地上的記號（站這裡開門）
+            CageVisual(exit, "Frame Left", new Vector3(-k_ExitWidth * 0.5f - 0.1f, 1.4f, -0.2f), new Vector3(0.2f, 2.8f, 0.06f), palette.Lock);
+            CageVisual(exit, "Frame Right", new Vector3(k_ExitWidth * 0.5f + 0.1f, 1.4f, -0.2f), new Vector3(0.2f, 2.8f, 0.06f), palette.Lock);
+            CageVisual(exit, "Frame Top", new Vector3(0f, k_ExitHeight + 0.1f, -0.2f), new Vector3(k_ExitWidth + 0.4f, 0.2f, 0.06f), palette.Lock);
+            GameObject lamp = CreateBlock(exit, "Lamp", new Vector3(0f, k_ExitHeight + 0.3f, -0.22f), new Vector3(1f, 0.18f, 0.06f), palette.Lamp);
+            RemoveCollider(lamp);
+            door.lamp = lamp.GetComponent<Renderer>();
+            CageVisual(exit, "Floor Mark", new Vector3(0f, 0.05f, -1.45f), new Vector3(k_ExitWidth, 0.02f, 2.6f), palette.Exit);
+
+            // 貨車：車廂地板和地圖一樣高，入口的橫梁只留 1.2 公尺。
+            Transform truck = Group(exit, "Truck");
+            CreateBlock(truck, "Bed Floor", new Vector3(0f, -0.25f, 3.8f), new Vector3(7.6f, 0.5f, 7.6f), palette.TruckFloor);
+            CreateBlock(truck, "Side Left", new Vector3(-3.65f, 1.3f, 3.9f), new Vector3(0.3f, 2.6f, 7.6f), palette.Truck);
+            CreateBlock(truck, "Side Right", new Vector3(3.65f, 1.3f, 3.9f), new Vector3(0.3f, 2.6f, 7.6f), palette.Truck);
+            CreateBlock(truck, "Back", new Vector3(0f, 1.3f, 7.55f), new Vector3(7.6f, 2.6f, 0.3f), palette.Truck);
+            CreateBlock(truck, "Roof", new Vector3(0f, 2.7f, 3.8f), new Vector3(7.6f, 0.2f, 7.8f), palette.Truck);
+            float lintelHeight = k_ExitHeight - k_TruckEntranceHeight;
+            CreateBlock(truck, "Low Entrance", new Vector3(0f, k_TruckEntranceHeight + lintelHeight * 0.5f, 0.4f),
+                new Vector3(7f, lintelHeight, 0.3f), palette.Truck);
+            CageVisual(truck, "Entrance Stripe", new Vector3(0f, k_TruckEntranceHeight + 0.08f, 0.24f), new Vector3(7f, 0.16f, 0.04f), palette.Lock);
+            CreateBlock(truck, "Cab", new Vector3(0f, 1.5f, 9.1f), new Vector3(6.4f, 3f, 2.6f), palette.Vent);
+            CageVisual(truck, "Windshield", new Vector3(0f, 2.1f, 10.42f), new Vector3(5.6f, 1f, 0.04f), palette.Dark);
+
+            // 「上了貨車」的範圍：入口橫梁後面一點，到車廂最裡面。
+            door.truckCenter = exit.TransformPoint(new Vector3(0f, 0f, 4f));
+            bool alongX = side == Side.North || side == Side.South;
+            door.truckSize = alongX ? new Vector3(6.8f, 2.6f, 6f) : new Vector3(6f, 2.6f, 6.8f);
+        }
+
+        /// <summary>
+        /// 保全控制台（M4，人類用）：每張地圖 3 台，照給的順序編號。桌子有碰撞，螢幕的顏色表示能不能用（綠＝可以、黃＝冷卻、紅＝當機）。
+        /// 地上一塊藍色的記號，遠遠看得出來。
+        /// </summary>
+        static void BuildConsoles(Transform mapRoot, Palette palette, params Vector2[] spots)
+        {
+            Transform group = Group(mapRoot, "Security Consoles");
+            for (int i = 0; i < spots.Length; i++)
+            {
+                float x = spots[i].x;
+                float z = spots[i].y;
+                Vector3 toCenter = new Vector3(-x, 0f, -z);
+                float yaw = toCenter.sqrMagnitude > 0.01f ? Quaternion.LookRotation(toCenter).eulerAngles.y : 0f;
+                Transform pivot = Pivot(group, "Console " + (i + 1), x, z, yaw);
+                var console = pivot.gameObject.AddComponent<SecurityConsole>();
+                console.index = i;
+
+                CageVisual(pivot, "Floor Mark", new Vector3(0f, 0.05f, 0f), new Vector3(2.6f, 0.02f, 2.2f), palette.Vent);
+                CreateBlock(pivot, "Body", new Vector3(0f, 0.5f, 0f), new Vector3(1.4f, 1f, 0.7f), palette.ConsoleBody);
+                CageVisual(pivot, "Desk", new Vector3(0f, 1.02f, 0.1f), new Vector3(1.3f, 0.05f, 0.5f), palette.Dark);
+                CageVisual(pivot, "Screen Back", new Vector3(0f, 1.45f, -0.22f), new Vector3(1.1f, 0.7f, 0.04f), palette.Dark);
+                GameObject screen = CreateBlock(pivot, "Screen", new Vector3(0f, 1.45f, -0.18f), new Vector3(1f, 0.6f, 0.04f), palette.ConsoleScreen);
+                RemoveCollider(screen);
+                screen.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                console.screen = screen.GetComponent<Renderer>();
+                CageVisual(pivot, "Beacon", new Vector3(0.6f, 1.2f, 0.25f), new Vector3(0.12f, 0.35f, 0.12f), palette.CaptureCage);
+            }
+        }
+
+        /// <summary>可以破壞的東西的種類（決定外觀、大小、名字）。</summary>
+        enum BreakKind
+        {
+            Pot,
+            Beakers,
+            Bucket,
+            Paint,
+            WateringCan,
+            Boxes,
+            Monitor,
+            Cart,
+            BigPot,
+            Machine
+        }
+
+        struct BreakSpec
+        {
+            public BreakKind Kind;
+            public Vector3 Position;
+            public float Yaw;
+        }
+
+        /// <summary>每張地圖大約放幾個（使用者 2026-11-17 定：約 40 個）；多出來的先拿掉小東西。最多 64 個（MatchFlow.BrokenMask 的位元數）。</summary>
+        const int k_BreakablesPerMap = 40;
+
+        static readonly List<BreakSpec> s_Breakables = new List<BreakSpec>();
+
+        /// <summary>蓋地圖時，植栽箱、樹旁邊要不要自動加可以破壞的東西（收容區裡面不加）。</summary>
+        static bool s_CollectDecor;
+
+        static void AddBreakable(BreakKind kind, Vector3 position, float yaw)
+        {
+            s_Breakables.Add(new BreakSpec { Kind = kind, Position = position, Yaw = yaw });
+        }
+
+        static BreakSize SizeOf(BreakKind kind)
+        {
+            switch (kind)
+            {
+                case BreakKind.Boxes:
+                case BreakKind.Monitor:
+                case BreakKind.Cart:
+                    return BreakSize.Medium;
+                case BreakKind.BigPot:
+                case BreakKind.Machine:
+                    return BreakSize.Large;
+                default:
+                    return BreakSize.Small;
+            }
+        }
+
+        /// <summary>
+        /// 地圖蓋完時：把收集到的可以破壞的東西放好、從 0 開始編號。設施區積木（育苗區的花盆和推車、籠舍區的飼料桶、
+        /// 研究室的燒杯和電腦和實驗機器、倉庫的紙箱和油漆）和花園（植栽箱旁的澆水壺、樹旁的大盆栽）都是自動加的；
+        /// 超過 k_BreakablesPerMap 個時，平均拿掉一些小東西。
+        /// </summary>
+        static void FinishBreakables(Transform mapRoot, Palette palette)
+        {
+            s_CollectDecor = false;
+            var specs = new List<BreakSpec>(s_Breakables);
+            s_Breakables.Clear();
+
+            int excess = specs.Count - k_BreakablesPerMap;
+            if (excess > 0)
+            {
+                var smalls = new List<int>();
+                for (int i = 0; i < specs.Count; i++)
+                {
+                    if (SizeOf(specs[i].Kind) == BreakSize.Small)
+                    {
+                        smalls.Add(i);
+                    }
+                }
+
+                var remove = new HashSet<int>();
+                float step = smalls.Count / (float)Mathf.Max(1, excess);
+                for (int k = 0; k < excess && k < smalls.Count; k++)
+                {
+                    remove.Add(smalls[Mathf.Min(smalls.Count - 1, Mathf.FloorToInt(k * step))]);
+                }
+
+                var kept = new List<BreakSpec>();
+                for (int i = 0; i < specs.Count; i++)
+                {
+                    if (!remove.Contains(i))
+                    {
+                        kept.Add(specs[i]);
+                    }
+                }
+
+                specs = kept;
+            }
+
+            if (specs.Count > 64)
+            {
+                specs.RemoveRange(64, specs.Count - 64);
+            }
+
+            Transform group = Group(mapRoot, "Breakables");
+            for (int i = 0; i < specs.Count; i++)
+            {
+                BuildBreakable(group, i, specs[i], palette);
+            }
+        }
+
+        /// <summary>一個可以破壞的東西：外觀放在 Visual 底下（原點在底部，倒下時以底部為軸轉）；大的放在地上的有擋路的碰撞。</summary>
+        static void BuildBreakable(Transform parent, int index, BreakSpec spec, Palette palette)
+        {
+            Transform root = Group(parent, (index + 1) + " " + spec.Kind);
+            root.localPosition = spec.Position;
+            root.localRotation = Quaternion.Euler(0f, spec.Yaw, 0f);
+            var item = root.gameObject.AddComponent<Breakable>();
+            item.index = index;
+            item.size = SizeOf(spec.Kind);
+            Transform visual = Group(root, "Visual");
+            item.visual = visual;
+
+            Vector3 blockerCenter = Vector3.zero;
+            Vector3 blockerSize = Vector3.zero;
+            switch (spec.Kind)
+            {
+                case BreakKind.Pot:
+                    item.displayName = "花盆";
+                    item.radius = 0.2f;
+                    AddPart(visual, PrimitiveType.Cylinder, "Pot", new Vector3(0f, 0.13f, 0f), new Vector3(0.34f, 0.13f, 0.34f), palette.Pot);
+                    AddPart(visual, PrimitiveType.Sphere, "Leaves", new Vector3(0f, 0.38f, 0f), new Vector3(0.42f, 0.36f, 0.42f), palette.Plant);
+                    break;
+                case BreakKind.Beakers:
+                    item.displayName = "燒杯";
+                    item.radius = 0.2f;
+                    AddPart(visual, PrimitiveType.Cylinder, "Beaker 1", new Vector3(-0.12f, 0.1f, 0f), new Vector3(0.1f, 0.1f, 0.1f), palette.Tank);
+                    AddPart(visual, PrimitiveType.Cylinder, "Beaker 2", new Vector3(0.1f, 0.14f, 0.05f), new Vector3(0.1f, 0.14f, 0.1f), palette.Tank);
+                    AddPart(visual, PrimitiveType.Cylinder, "Beaker 3", new Vector3(0f, 0.08f, -0.12f), new Vector3(0.12f, 0.08f, 0.12f), palette.Keycard);
+                    break;
+                case BreakKind.Bucket:
+                    item.displayName = "飼料桶";
+                    item.radius = 0.25f;
+                    AddPart(visual, PrimitiveType.Cylinder, "Bucket", new Vector3(0f, 0.22f, 0f), new Vector3(0.45f, 0.22f, 0.45f), palette.Bucket);
+                    AddPart(visual, PrimitiveType.Cylinder, "Feed", new Vector3(0f, 0.43f, 0f), new Vector3(0.38f, 0.02f, 0.38f), palette.Straw);
+                    break;
+                case BreakKind.Paint:
+                    item.displayName = "油漆罐";
+                    item.radius = 0.3f;
+                    AddPart(visual, PrimitiveType.Cylinder, "Can 1", new Vector3(-0.15f, 0.14f, 0f), new Vector3(0.24f, 0.14f, 0.24f), palette.CaptureCage);
+                    AddPart(visual, PrimitiveType.Cylinder, "Can 2", new Vector3(0.15f, 0.14f, 0.05f), new Vector3(0.24f, 0.14f, 0.24f), palette.Vent);
+                    AddPart(visual, PrimitiveType.Cylinder, "Can 3", new Vector3(0f, 0.42f, 0.02f), new Vector3(0.22f, 0.13f, 0.22f), palette.Lock);
+                    break;
+                case BreakKind.WateringCan:
+                    item.displayName = "澆水壺";
+                    item.radius = 0.2f;
+                    AddPart(visual, PrimitiveType.Cube, "Body", new Vector3(0f, 0.15f, 0f), new Vector3(0.32f, 0.3f, 0.2f), palette.Vent);
+                    AddPart(visual, PrimitiveType.Cube, "Spout", new Vector3(0.24f, 0.24f, 0f), new Vector3(0.24f, 0.05f, 0.05f), palette.Vent);
+                    AddPart(visual, PrimitiveType.Cube, "Handle", new Vector3(-0.05f, 0.34f, 0f), new Vector3(0.2f, 0.05f, 0.05f), palette.Dark);
+                    break;
+                case BreakKind.Boxes:
+                    item.displayName = "紙箱堆";
+                    item.radius = 0.4f;
+                    AddPart(visual, PrimitiveType.Cube, "Box 1", new Vector3(0f, 0.3f, 0f), new Vector3(0.75f, 0.6f, 0.65f), palette.Crate);
+                    AddPart(visual, PrimitiveType.Cube, "Box 2", new Vector3(0.05f, 0.82f, 0.03f), new Vector3(0.55f, 0.44f, 0.5f), palette.Crate);
+                    AddPart(visual, PrimitiveType.Cube, "Box 3", new Vector3(-0.05f, 1.18f, 0f), new Vector3(0.4f, 0.28f, 0.35f), palette.Straw);
+                    blockerCenter = new Vector3(0f, 0.65f, 0f);
+                    blockerSize = new Vector3(0.8f, 1.3f, 0.7f);
+                    break;
+                case BreakKind.Monitor:
+                    item.displayName = "電腦螢幕";
+                    item.radius = 0.3f;
+                    AddPart(visual, PrimitiveType.Cube, "Stand", new Vector3(0f, 0.06f, 0f), new Vector3(0.25f, 0.12f, 0.18f), palette.Dark);
+                    AddPart(visual, PrimitiveType.Cube, "Screen", new Vector3(0f, 0.38f, 0f), new Vector3(0.62f, 0.4f, 0.05f), palette.Dark);
+                    AddPart(visual, PrimitiveType.Cube, "Picture", new Vector3(0f, 0.38f, -0.03f), new Vector3(0.56f, 0.34f, 0.01f), palette.ConsoleScreen);
+                    break;
+                case BreakKind.Cart:
+                    item.displayName = "澆水推車";
+                    item.radius = 0.5f;
+                    AddPart(visual, PrimitiveType.Cube, "Base", new Vector3(0f, 0.2f, 0f), new Vector3(0.95f, 0.08f, 0.5f), palette.Dark);
+                    AddPart(visual, PrimitiveType.Cube, "Tank", new Vector3(0f, 0.5f, 0f), new Vector3(0.9f, 0.5f, 0.5f), palette.Vent);
+                    AddPart(visual, PrimitiveType.Cube, "Handle", new Vector3(0.52f, 0.85f, 0f), new Vector3(0.06f, 0.4f, 0.5f), palette.Dark);
+                    blockerCenter = new Vector3(0f, 0.5f, 0f);
+                    blockerSize = new Vector3(1f, 1f, 0.55f);
+                    break;
+                case BreakKind.BigPot:
+                    item.displayName = "大盆栽";
+                    item.radius = 0.45f;
+                    AddPart(visual, PrimitiveType.Cylinder, "Pot", new Vector3(0f, 0.3f, 0f), new Vector3(0.85f, 0.3f, 0.85f), palette.Pot);
+                    AddPart(visual, PrimitiveType.Cube, "Stem", new Vector3(0f, 1f, 0f), new Vector3(0.15f, 1.2f, 0.15f), palette.Table);
+                    AddPart(visual, PrimitiveType.Sphere, "Leaves", new Vector3(0f, 1.75f, 0f), new Vector3(1.3f, 1.1f, 1.3f), palette.Plant);
+                    break;
+                case BreakKind.Machine:
+                    item.displayName = "實驗機器";
+                    item.radius = 0.55f;
+                    AddPart(visual, PrimitiveType.Cube, "Body", new Vector3(0f, 0.85f, 0f), new Vector3(1.1f, 1.7f, 0.8f), palette.Counter);
+                    AddPart(visual, PrimitiveType.Cube, "Panel", new Vector3(0f, 1.15f, -0.41f), new Vector3(0.8f, 0.5f, 0.02f), palette.ConsoleScreen);
+                    AddPart(visual, PrimitiveType.Cube, "Light", new Vector3(-0.35f, 1.55f, -0.41f), new Vector3(0.1f, 0.1f, 0.02f), palette.CaptureCage);
+                    blockerCenter = new Vector3(0f, 0.85f, 0f);
+                    blockerSize = new Vector3(1.1f, 1.7f, 0.8f);
+                    break;
+            }
+
+            if (blockerSize != Vector3.zero)
+            {
+                item.blocker = SolidCollider(root, "Blocker", blockerCenter, blockerSize).GetComponent<Collider>();
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 實驗室（派對）與門禁卡
+        // ------------------------------------------------------------------
+
+        const float k_LabHeight = 3f;
+
+        /// <summary>
+        /// 實驗室：給房間的範圍（貼著外牆的那幾面不另外蓋牆，用外牆）、門開在哪一面和門在那一面的位置，
+        /// 就會蓋好牆、屋頂、刷卡的門，裡面擺大螢幕和控台（在門的對面）、舞台、懶骨頭、派對燈和球位。
+        /// 牆和屋頂都是不透明的（預設圖層）：外面看不到裡面，裡面的人只能用大螢幕看外面。
+        /// 門的碰撞一直都在（刷卡時門板只是看起來升起來），被放出來的動物由主機直接搬到門外。
+        /// keycardSpots 是這張地圖門禁卡的候選位置（x, z）。
+        /// </summary>
+        static void BuildLabRoom(Transform mapRoot, float xMin, float xMax, float zMin, float zMax, Side doorSide, float doorAlong,
+            Palette palette, params Vector2[] keycardSpots)
+        {
+            Transform room = Group(mapRoot, "Lab Room");
+            float sizeX = xMax - xMin;
+            float sizeZ = zMax - zMin;
+            var center = new Vector3((xMin + xMax) * 0.5f, 0f, (zMin + zMax) * 0.5f);
+            const float t = k_WallThickness;
+
+            FloorPatch(room, "Party Floor", xMin, xMax, zMin, zMax, 0.045f, palette.Party);
+
+            // 牆：只蓋不是外牆的那幾面，兩端各多 0.15 公尺，轉角才不會有縫。
+            Opening door = Door(doorAlong);
+            var none = new Opening[0];
+            if (xMin > -39.8f)
+            {
+                WallAlongZ(room, "Wall West", xMin, zMin - t * 0.5f, zMax + t * 0.5f, palette.LabWall, doorSide == Side.West ? new[] { door } : none);
+            }
+
+            if (xMax < 39.8f)
+            {
+                WallAlongZ(room, "Wall East", xMax, zMin - t * 0.5f, zMax + t * 0.5f, palette.LabWall, doorSide == Side.East ? new[] { door } : none);
+            }
+
+            if (zMin > -29.8f)
+            {
+                WallAlongX(room, "Wall South", zMin, xMin - t * 0.5f, xMax + t * 0.5f, palette.LabWall, doorSide == Side.South ? new[] { door } : none);
+            }
+
+            if (zMax < 29.8f)
+            {
+                WallAlongX(room, "Wall North", zMax, xMin - t * 0.5f, xMax + t * 0.5f, palette.LabWall, doorSide == Side.North ? new[] { door } : none);
+            }
+
+            CreateBlock(room, "Roof", center + Vector3.up * (k_LabHeight + 0.1f), new Vector3(sizeX + t, 0.2f, sizeZ + t), palette.LabWall);
+
+            // 門：物件放在門洞正中央，自己的 +Z 朝門外。
+            Vector3 doorPoint;
+            Vector3 outward;
+            switch (doorSide)
+            {
+                case Side.North:
+                    doorPoint = new Vector3(doorAlong, 0f, zMax);
+                    outward = Vector3.forward;
+                    break;
+                case Side.South:
+                    doorPoint = new Vector3(doorAlong, 0f, zMin);
+                    outward = Vector3.back;
+                    break;
+                case Side.East:
+                    doorPoint = new Vector3(xMax, 0f, doorAlong);
+                    outward = Vector3.right;
+                    break;
+                default:
+                    doorPoint = new Vector3(xMin, 0f, doorAlong);
+                    outward = Vector3.left;
+                    break;
+            }
+
+            float doorYaw = Quaternion.LookRotation(outward).eulerAngles.y;
+            Transform doorPivot = Pivot(room, "Door", doorPoint.x, doorPoint.z, doorYaw);
+            SolidCollider(doorPivot, "Blocker", new Vector3(0f, k_DoorHeight * 0.5f, 0f), new Vector3(k_DoorWidth, k_DoorHeight, t));
+            GameObject panel = CreateBlock(doorPivot, "Panel", new Vector3(0f, k_DoorHeight * 0.5f, 0f),
+                new Vector3(k_DoorWidth - 0.04f, k_DoorHeight - 0.02f, 0.12f), palette.LabDoor);
+            RemoveCollider(panel);
+            CageVisual(doorPivot, "Sign", new Vector3(0f, k_DoorHeight + 0.35f, t * 0.5f + 0.03f), new Vector3(k_DoorWidth + 0.6f, 0.4f, 0.04f), palette.CaptureCage);
+            CageVisual(doorPivot, "Reader", new Vector3(k_DoorWidth * 0.5f + 0.4f, 1.2f, t * 0.5f + 0.05f), new Vector3(0.24f, 0.34f, 0.1f), palette.Dark);
+            GameObject lamp = CreateBlock(doorPivot, "Reader Lamp", new Vector3(k_DoorWidth * 0.5f + 0.4f, 1.3f, t * 0.5f + 0.11f), new Vector3(0.14f, 0.09f, 0.02f), palette.Lamp);
+            RemoveCollider(lamp);
+            CageVisual(doorPivot, "Mark Outside", new Vector3(0f, 0.05f, 0.85f), new Vector3(k_DoorWidth, 0.02f, 1.4f), palette.Lock);
+
+            // 房間自己的座標：forward 從門那一面指向對面的牆（大螢幕在那裡），right 是左右。
+            Vector3 forward = -outward;
+            Vector3 right = Vector3.Cross(Vector3.up, forward);
+            float depth = Mathf.Abs(Vector3.Dot(new Vector3(sizeX, 0f, sizeZ), forward));
+            float width = Mathf.Abs(Vector3.Dot(new Vector3(sizeX, 0f, sizeZ), right));
+            float doorLateral = Vector3.Dot(doorPoint - center, right);
+            float away = doorLateral >= 0f ? -1f : 1f;
+            System.Func<float, float, Vector3> local = (lateral, along) => center + right * lateral + forward * along;
+            float roomYaw = Quaternion.LookRotation(forward).eulerAngles.y;
+
+            // 大螢幕（在門對面的牆上，16:9）和前面的控台。Quad 的正面朝自己的 -Z，所以 +Z 朝牆。
+            Vector3 screenBase = local(0f, depth * 0.5f - 0.05f);
+            Transform screenPivot = Pivot(room, "Big Screen", screenBase.x, screenBase.z, roomYaw);
+            float screenWidth = Mathf.Min(4.4f, width - 1.5f);
+            float screenHeight = screenWidth * 9f / 16f;
+            float screenY = 0.45f + screenHeight * 0.5f;
+            CageVisual(screenPivot, "Frame", new Vector3(0f, screenY, 0.01f), new Vector3(screenWidth + 0.24f, screenHeight + 0.24f, 0.06f), palette.Dark);
+            GameObject screen = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            screen.name = "Screen";
+            screen.transform.SetParent(screenPivot, false);
+            screen.transform.localPosition = new Vector3(0f, screenY, -0.03f);
+            screen.transform.localScale = new Vector3(screenWidth, screenHeight, 1f);
+            screen.GetComponent<Renderer>().sharedMaterial = palette.Screen;
+            screen.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            RemoveCollider(screen);
+
+            CreateBlock(screenPivot, "Console", new Vector3(0f, 0.4f, -1.8f), new Vector3(1.8f, 0.8f, 0.6f), palette.Counter);
+            CageVisual(screenPivot, "Console Panel", new Vector3(0f, 0.81f, -1.8f), new Vector3(1.5f, 0.02f, 0.45f), palette.Dark);
+            CageVisual(screenPivot, "Console Button", new Vector3(0.45f, 0.84f, -1.85f), new Vector3(0.18f, 0.05f, 0.18f), palette.CaptureCage);
+            Vector3 consolePoint = local(0f, depth * 0.5f - 2.4f);
+
+            // 派對擺設：門的另一側角落一個矮舞台（0.45 公尺，大家都跳得上去），大螢幕兩側各一個懶骨頭，中間一塊地毯。
+            Transform props = Group(room, "Party Props");
+            Vector3 stage = local(away * (width * 0.5f - 1.4f), -depth * 0.5f + 1.1f);
+            Transform stagePivot = Pivot(props, "Stage", stage.x, stage.z, roomYaw);
+            CreateBlock(stagePivot, "Body", new Vector3(0f, 0.225f, 0f), new Vector3(2.4f, 0.45f, 1.6f), palette.PartyRug);
+            Vector3 bagA = local(width * 0.5f - 1f, depth * 0.5f - 1f);
+            Vector3 bagB = local(-(width * 0.5f - 1f), depth * 0.5f - 1f);
+            CreateBlock(props, "Bean Bag A", bagA + Vector3.up * 0.2f, new Vector3(1f, 0.4f, 1f), palette.Vent);
+            CreateBlock(props, "Bean Bag B", bagB + Vector3.up * 0.2f, new Vector3(1f, 0.4f, 1f), palette.CaptureCage);
+            Vector3 rug = local(0f, -0.2f);
+            Transform rugPivot = Pivot(props, "Rug", rug.x, rug.z, roomYaw);
+            CageVisual(rugPivot, "Body", new Vector3(0f, 0.055f, 0f), new Vector3(Mathf.Min(5f, width - 3f), 0.02f, Mathf.Min(4f, depth - 4f)), palette.PartyRug);
+
+            // 派對燈：三盞不投影的點光源，LabRoom 會讓它們慢慢換顏色。範圍小一點，免得照到牆外。
+            var lights = new List<Light>();
+            Vector3[] lightSpots = { local(-width * 0.25f, 0f), local(width * 0.25f, 0f), local(0f, -depth * 0.25f) };
+            for (int i = 0; i < lightSpots.Length; i++)
+            {
+                var lightObject = new GameObject("Party Light " + (i + 1));
+                lightObject.transform.SetParent(props, false);
+                lightObject.transform.position = lightSpots[i] + Vector3.up * 2.6f;
+                var light = lightObject.AddComponent<Light>();
+                light.type = UnityEngine.LightType.Point;
+                light.range = 5.5f;
+                light.intensity = 2.2f;
+                light.shadows = UnityEngine.LightShadows.None;
+                lights.Add(light);
+            }
+
+            var component = room.gameObject.AddComponent<LabRoom>();
+            component.interiorCenter = center;
+            component.interiorSize = new Vector3(sizeX, k_LabHeight, sizeZ);
+            component.doorPoint = doorPoint;
+            component.doorOutward = outward;
+            component.doorPanel = panel.transform;
+            component.readerLamp = lamp.GetComponent<Renderer>();
+            component.screen = screen.GetComponent<Renderer>();
+            component.consolePoint = consolePoint;
+            component.partyLights = lights.ToArray();
+            component.ballSpots = new[]
+            {
+                local(-1.6f, -0.9f) + Vector3.up * 0.45f,
+                local(1.6f, -0.9f) + Vector3.up * 0.45f,
+                local(0f, 0.9f) + Vector3.up * 0.45f
+            };
+
+            var spots = new Vector3[keycardSpots.Length];
+            for (int i = 0; i < keycardSpots.Length; i++)
+            {
+                spots[i] = new Vector3(keycardSpots[i].x, 0f, keycardSpots[i].y);
+            }
+
+            component.keycardSpots = spots;
+        }
+
+        /// <summary>
+        /// 門禁卡的外觀（整個場景只有一張，三張地圖共用）：一張青色的卡片（不受光影響），上面一條深色的磁條。
+        /// 位置由 KeycardView 每一格照 MatchState 擺（地上、或拿著的動物頭上），還沒開房時藏起來。
+        /// </summary>
+        static void BuildKeycard(Palette palette)
+        {
+            var root = new GameObject("Keycard");
+            var view = root.AddComponent<KeycardView>();
+            Transform card = Group(root.transform, "Card");
+            CageVisual(card, "Body", Vector3.zero, new Vector3(0.44f, 0.04f, 0.3f), palette.Keycard);
+            CageVisual(card, "Stripe", new Vector3(0f, 0.025f, 0.08f), new Vector3(0.44f, 0.012f, 0.06f), palette.Dark);
+            CageVisual(card, "Chip", new Vector3(-0.1f, 0.025f, -0.04f), new Vector3(0.1f, 0.012f, 0.08f), palette.Lock);
+            view.card = card;
+            card.gameObject.SetActive(false);
+        }
+
+        /// <summary>看不見、但擋得住所有人的碰撞（預設圖層）。</summary>
+        static GameObject SolidCollider(Transform parent, string name, Vector3 center, Vector3 size)
+        {
+            var blocker = new GameObject(name);
+            blocker.transform.SetParent(parent, false);
+            blocker.transform.localPosition = center;
+            blocker.AddComponent<BoxCollider>().size = size;
+            return blocker;
+        }
+
+        // ------------------------------------------------------------------
         // 收容區（開場越獄）
         // ------------------------------------------------------------------
 
@@ -1340,6 +2048,10 @@ namespace AnimalEscape.EditorTools
             float sizeZ = zMax - zMin;
             float centerX = (xMin + xMax) * 0.5f;
             float centerZ = (zMin + zMax) * 0.5f;
+
+            // 收容區裡的樹和擺設不放可以破壞的東西（動物一開場就關在裡面，按一下就加混亂值太便宜）。
+            bool collectDecor = s_CollectDecor;
+            s_CollectDecor = false;
 
             FloorPatch(habitat, "Floor Tint", xMin, xMax, zMin, zMax, 0.035f, floor);
 
@@ -1440,6 +2152,7 @@ namespace AnimalEscape.EditorTools
 
             // 出生點在正中央，面向門。
             AddSpawn(map, role, centerX, centerZ, gateYaw);
+            s_CollectDecor = collectDecor;
         }
 
         /// <summary>收容區的一面鐵網。hasGate 為 true 時，正中間留一個門洞（門洞上方補一片）。</summary>
@@ -1553,6 +2266,12 @@ namespace AnimalEscape.EditorTools
             Transform pivot = Pivot(parent, name, x, z, yaw);
             CreateBlock(pivot, "Box", new Vector3(0f, 0.725f, 0f), new Vector3(length, 1.45f, width), palette.Crate);
             CreateBlock(pivot, "Plants", new Vector3(0f, 1.49f, 0f), new Vector3(length - 0.2f, 0.08f, width - 0.2f), palette.Plant);
+
+            // 植栽箱的一端放一個澆水壺（小東西，可以弄倒）。
+            if (s_CollectDecor)
+            {
+                AddBreakable(BreakKind.WateringCan, pivot.TransformPoint(new Vector3(length * 0.5f + 0.35f, 0f, 0f)), yaw);
+            }
         }
 
         /// <summary>高樹籬：2.2 公尺高，擋視線用。length 是長邊，yaw = 0 時長邊沿 X。</summary>
@@ -1560,6 +2279,12 @@ namespace AnimalEscape.EditorTools
         {
             Transform pivot = Pivot(parent, name, x, z, yaw);
             CreateBlock(pivot, "Hedge", new Vector3(0f, 1.1f, 0f), new Vector3(length, 2.2f, width), palette.Bush);
+
+            // 樹籬的一端放一個小花盆（可以弄倒）。地圖上可以破壞的東西太多時，FinishBreakables 會先拿掉一些小東西。
+            if (s_CollectDecor)
+            {
+                AddBreakable(BreakKind.Pot, pivot.TransformPoint(new Vector3(-length * 0.5f - 0.35f, 0f, 0f)), yaw);
+            }
         }
 
         /// <summary>樹：1 公尺粗的樹幹，樹冠在 3.2 公尺以上（不擋路，只是讓場景有高有低）。</summary>
@@ -1569,6 +2294,12 @@ namespace AnimalEscape.EditorTools
             CreateBlock(pivot, "Trunk", new Vector3(0f, 1.6f, 0f), new Vector3(1f, 3.2f, 1f), palette.Table);
             // 樹冠沒有碰撞：沒有人上得去，留著只會讓第三人稱鏡頭在樹下被擠到角色身上。
             RemoveCollider(CreateBlock(pivot, "Canopy", new Vector3(0f, 3.9f, 0f), new Vector3(3.6f, 1.4f, 3.6f), palette.Plant));
+
+            // 樹旁邊放一個大盆栽（大東西，要按住才推得倒）。
+            if (s_CollectDecor)
+            {
+                AddBreakable(BreakKind.BigPot, new Vector3(x + 1.5f, 0f, z + 0.4f), 0f);
+            }
         }
 
         /// <summary>高植栽架：2.2 公尺高、6 公尺長（沿 X）、0.6 公尺厚，擋視線用。</summary>
@@ -1681,26 +2412,6 @@ namespace AnimalEscape.EditorTools
             Platform(steps, "Step 0.5m", x - 2f, z, 2f, 2f, 0.5f, palette);
             Platform(steps, "Step 1.0m", x, z, 2f, 2f, 1f, palette);
             Platform(steps, "Step 1.5m", x + 2f, z, 2f, 2f, 1.5f, palette);
-        }
-
-        /// <summary>貨車出口的記號（東牆上）：之後動物逃脫的地方。現在只是標示位置，還不能走出去。</summary>
-        static void ExitOnEastWall(Transform parent, string name, float zFrom, float zTo, Palette palette)
-        {
-            Transform exit = Group(parent, name);
-            float middle = (zFrom + zTo) * 0.5f;
-            float length = zTo - zFrom;
-            CreateBlock(exit, "Door", new Vector3(39.75f, 1.4f, middle), new Vector3(0.2f, 2.8f, length), palette.Exit);
-            RemoveCollider(CreateBlock(exit, "Floor Mark", new Vector3(38.2f, 0.02f, middle), new Vector3(2.8f, 0.04f, length), palette.Exit));
-        }
-
-        /// <summary>貨車出口的記號（南牆上）。</summary>
-        static void ExitOnSouthWall(Transform parent, string name, float xFrom, float xTo, Palette palette)
-        {
-            Transform exit = Group(parent, name);
-            float middle = (xFrom + xTo) * 0.5f;
-            float length = xTo - xFrom;
-            CreateBlock(exit, "Door", new Vector3(middle, 1.4f, -29.75f), new Vector3(length, 2.8f, 0.2f), palette.Exit);
-            RemoveCollider(CreateBlock(exit, "Floor Mark", new Vector3(middle, 0.02f, -28.2f), new Vector3(length, 0.04f, 2.8f), palette.Exit));
         }
 
         /// <summary>

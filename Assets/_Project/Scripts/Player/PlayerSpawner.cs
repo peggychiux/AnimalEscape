@@ -181,7 +181,7 @@ namespace AnimalEscape.Players
 
         /// <summary>
         /// 主機端：把玩家換成指定的身分。Role.None 表示只收掉角色，讓玩家回到選身分畫面。
-        /// 被網住、被扛著、關在籠子裡的動物不能換身分（不然換一下就逃掉了）；force = true 時不管（換地圖時用）。
+        /// 被網住、被扛著、關在籠子裡的動物不能換身分（不然換一下就逃掉了）；在實驗室裡可以；force = true 時不管（換地圖時用）。
         /// </summary>
         public void AssignRole(PlayerSlot slot, Role role, bool force = false)
         {
@@ -192,11 +192,18 @@ namespace AnimalEscape.Players
 
             ulong clientId = slot.OwnerClientId;
 
-            // 被網住、被扛著、關在籠子裡都不能換身分（不然換一下就逃掉了）；出局了可以（重新出生）。
+            // 比賽中不能換身分（M4）；開始比賽、換地圖、離開遊戲這些由主機強制的不受影響。
+            if (!force && MatchFlow.Instance != null && MatchFlow.Instance.IsPlaying)
+            {
+                return;
+            }
+
+            // 被網住、被扛著、關在籠子裡都不能換身分（不然換一下就逃掉了）；在實驗室裡可以（重新出生）。
+            // 之後有了「比賽中」的流程（M4），比賽中一律不能換。
             PlayerAvatar current;
             if (!force && m_Avatars.TryGetValue(clientId, out current) && current != null && current.IsSpawned
                 && current.Capture != null && current.Capture.State.Value != CaptureState.Free
-                && current.Capture.State.Value != CaptureState.Out)
+                && current.Capture.State.Value != CaptureState.InLab && current.Capture.State.Value != CaptureState.Escaped)
             {
                 return;
             }
@@ -222,9 +229,11 @@ namespace AnimalEscape.Players
 
             m_Avatars.Remove(clientId);
             slot.CurrentRole.Value = role;
+            slot.LeftMatch.Value = false;
 
-            // 還沒有「一局」的流程：每次重新出生，被關的次數歸零。
+            // 還沒有「一局」的流程：每次重新出生，被關的次數和「被門禁卡救過」都歸零。
             slot.TimesCaged.Value = 0;
+            slot.ReleasedFromLab.Value = false;
 
             if (role == Role.None)
             {
@@ -254,6 +263,71 @@ namespace AnimalEscape.Players
             avatar.PendingRole = role;
             networkObject.SpawnWithOwnership(clientId, true);
             m_Avatars[clientId] = avatar;
+        }
+
+        /// <summary>
+        /// 主機端：這位玩家在實驗室裡按了「離開遊戲」但留在房間裡（主機自己就是這樣：主機一離開房間，整個房間就關了）。
+        /// 收掉他的角色、標記「離開了這一局」；這局算他沒逃出去。只有角色在實驗室裡時才有效。
+        /// </summary>
+        public void LeaveMatch(PlayerSlot slot)
+        {
+            if (m_Net == null || !m_Net.IsServer || slot == null || !slot.IsSpawned)
+            {
+                return;
+            }
+
+            PlayerAvatar current;
+            if (!m_Avatars.TryGetValue(slot.OwnerClientId, out current) || current == null || !current.IsSpawned
+                || current.Capture == null || !current.Capture.IsInLab)
+            {
+                return;
+            }
+
+            AssignRole(slot, Role.None, true);
+            slot.LeftMatch.Value = true;
+            if (MatchFlow.Instance != null && MatchFlow.Instance.IsPlaying)
+            {
+                slot.Result.Value = MatchResult.Left;
+            }
+        }
+
+        /// <summary>
+        /// 主機端（開始比賽時）：每位選好身分的玩家回到自己身分的出生點，狀態全部清掉（被網住、被關、在實驗室、在貨車上…），
+        /// 被關的次數歸零。還沒選身分的玩家這一局就不參加。收容區由 MatchFlow 另外全部鎖上。
+        ///
+        /// 角色不重新產生，而是原地重設再搬回出生點：重新產生的話，正在走動的玩家送出的最後幾筆位置會送到已經被收掉的角色上，
+        /// 主機會跳 Netcode 的警告（Deferred OnSpawn … not received within the timeout，2026-11-17 實測）。
+        /// </summary>
+        public void RespawnAllForMatch()
+        {
+            var slots = new List<PlayerSlot>(PlayerSlot.All);
+            for (int i = 0; i < slots.Count; i++)
+            {
+                PlayerSlot slot = slots[i];
+                if (slot == null || !slot.IsSpawned || slot.CurrentRole.Value == Role.None)
+                {
+                    continue;
+                }
+
+                Role role = slot.CurrentRole.Value;
+                PlayerAvatar avatar;
+                if (!m_Avatars.TryGetValue(slot.OwnerClientId, out avatar) || avatar == null || !avatar.IsSpawned
+                    || avatar.AvatarRole.Value != role || avatar.Capture == null)
+                {
+                    // 沒有角色（不應該發生）就照舊產生一個。
+                    AssignRole(slot, role, true);
+                    continue;
+                }
+
+                slot.TimesCaged.Value = 0;
+                slot.ReleasedFromLab.Value = false;
+                slot.LeftMatch.Value = false;
+
+                Vector3 position;
+                Quaternion rotation;
+                GetSpawnPoint(role, out position, out rotation);
+                avatar.Capture.ServerResetForMatch(position, rotation);
+            }
         }
 
         /// <summary>這個身分是不是已經被別人選走了（每一種身分只能有一位）。</summary>

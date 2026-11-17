@@ -18,9 +18,16 @@ namespace AnimalEscape.Players
         PlayerAvatar m_Avatar;
         PlayerCapture m_Capture;
         InputAction m_MoveAction;
+        InputAction m_ArrowForwardAction;
+        InputAction m_ArrowTurnAction;
         InputAction m_JumpAction;
         InputAction m_SneakAction;
         float m_VerticalSpeed;
+
+        // 測試工具用：模擬按住 ←→（轉鏡頭）和 ↑↓（前後），走和鍵盤同一段程式，只差沒有讀鍵盤。
+        bool m_HasExternalTurn;
+        float m_ExternalTurn;
+        float m_ExternalForward;
 
         // 外部控制：測試工具（之後也可以給電腦玩家）用程式指定移動方向，取代鍵盤輸入。
         bool m_HasExternalInput;
@@ -51,6 +58,24 @@ namespace AnimalEscape.Players
             m_HasExternalInput = false;
             m_ExternalMove = Vector3.zero;
             m_ExternalSneak = false;
+        }
+
+        /// <summary>
+        /// 用程式模擬「按住 ←→ 轉鏡頭、↑↓ 前後走」（turn：−1 左、+1 右；forward：−1 後退、+1 前進），測試工具用。
+        /// 和鍵盤走同一段程式（GameConfig.arrowKeyTurning 關掉時，←→ 是橫著走）。呼叫 ClearExternalTurn 放開。
+        /// </summary>
+        public void SetExternalTurn(float turn, float forward)
+        {
+            m_ExternalTurn = Mathf.Clamp(turn, -1f, 1f);
+            m_ExternalForward = Mathf.Clamp(forward, -1f, 1f);
+            m_HasExternalTurn = true;
+        }
+
+        public void ClearExternalTurn()
+        {
+            m_HasExternalTurn = false;
+            m_ExternalTurn = 0f;
+            m_ExternalForward = 0f;
         }
 
         /// <summary>要求跳一次（站在地上才跳得起來）。只有擁有這個角色的那台電腦呼叫才有效。</summary>
@@ -127,11 +152,44 @@ namespace AnimalEscape.Players
             // 視窗不在最前面時不讀取輸入：同一台電腦開多個視窗測試時，只有正在操作的那個視窗的角色會動。
             bool focused = Application.isFocused;
 
-            // 以鏡頭方向為準的移動方向
-            Vector2 input = focused ? m_MoveAction.ReadValue<Vector2>() : Vector2.zero;
+            // 以鏡頭方向為準的移動方向：WASD（手把左搖桿）往各方向走，A／D 是橫著走。
+            // 方向鍵：↑↓ 前後走；←→ 預設是轉鏡頭（GameConfig.arrowKeyTurning，照《黎明死線》），關掉就和 A／D 一樣橫著走。
+            var playerCamera = PlayerCamera.Instance;
+            Vector2 input = Vector2.zero;
+            float arrowTurn = 0f;
+            float arrowForward = 0f;
+            if (focused)
+            {
+                input = m_MoveAction.ReadValue<Vector2>();
+                arrowTurn = m_ArrowTurnAction.ReadValue<float>();
+                arrowForward = m_ArrowForwardAction.ReadValue<float>();
+            }
+
+            if (m_HasExternalTurn)
+            {
+                arrowTurn = m_ExternalTurn;
+                arrowForward = m_ExternalForward;
+            }
+
+            float turn = 0f;
+            input.y += arrowForward;
+            if (config.arrowKeyTurning)
+            {
+                turn = arrowTurn;
+            }
+            else
+            {
+                input.x += arrowTurn;
+            }
+
+            input = Vector2.ClampMagnitude(input, 1f);
+            if (playerCamera != null && turn != 0f)
+            {
+                playerCamera.AddYaw(turn * config.keyboardTurnSpeed * deltaTime);
+            }
+
             Vector3 forward = Vector3.forward;
             Vector3 right = Vector3.right;
-            var playerCamera = PlayerCamera.Instance;
             if (playerCamera != null)
             {
                 forward = playerCamera.PlanarForward;
@@ -271,9 +329,8 @@ namespace AnimalEscape.Players
                     continue;
                 }
 
-                // 被扛著的動物沒有碰撞（牠本來就貼在人類身上）；出局的角色已經不在場上。
-                if (other.Capture != null
-                    && (other.Capture.State.Value == CaptureState.Carried || other.Capture.State.Value == CaptureState.Out))
+                // 被扛著的動物沒有碰撞（牠本來就貼在人類身上）。
+                if (other.Capture != null && other.Capture.State.Value == CaptureState.Carried)
                 {
                     continue;
                 }
@@ -318,12 +375,13 @@ namespace AnimalEscape.Players
                 .With("Down", "<Keyboard>/s")
                 .With("Left", "<Keyboard>/a")
                 .With("Right", "<Keyboard>/d");
-            m_MoveAction.AddCompositeBinding("2DVector")
-                .With("Up", "<Keyboard>/upArrow")
-                .With("Down", "<Keyboard>/downArrow")
-                .With("Left", "<Keyboard>/leftArrow")
-                .With("Right", "<Keyboard>/rightArrow");
             m_MoveAction.AddBinding("<Gamepad>/leftStick");
+
+            // 方向鍵另外讀：↑↓ 前後走，←→ 轉鏡頭（或關掉 arrowKeyTurning 時橫著走）。
+            m_ArrowForwardAction = new InputAction("ArrowForward", InputActionType.Value);
+            m_ArrowForwardAction.AddCompositeBinding("1DAxis").With("Negative", "<Keyboard>/downArrow").With("Positive", "<Keyboard>/upArrow");
+            m_ArrowTurnAction = new InputAction("ArrowTurn", InputActionType.Value);
+            m_ArrowTurnAction.AddCompositeBinding("1DAxis").With("Negative", "<Keyboard>/leftArrow").With("Positive", "<Keyboard>/rightArrow");
 
             m_JumpAction = new InputAction("Jump", InputActionType.Button);
             m_JumpAction.AddBinding("<Keyboard>/space");
@@ -334,6 +392,8 @@ namespace AnimalEscape.Players
             m_SneakAction.AddBinding("<Gamepad>/leftStickPress");
 
             m_MoveAction.Enable();
+            m_ArrowForwardAction.Enable();
+            m_ArrowTurnAction.Enable();
             m_JumpAction.Enable();
             m_SneakAction.Enable();
         }
@@ -341,6 +401,8 @@ namespace AnimalEscape.Players
         void DisposeInput()
         {
             DisposeAction(ref m_MoveAction);
+            DisposeAction(ref m_ArrowForwardAction);
+            DisposeAction(ref m_ArrowTurnAction);
             DisposeAction(ref m_JumpAction);
             DisposeAction(ref m_SneakAction);
         }

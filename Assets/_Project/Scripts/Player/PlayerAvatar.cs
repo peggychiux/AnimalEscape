@@ -27,6 +27,9 @@ namespace AnimalEscape.Players
         /// <summary>同一個角色身上的捕捉狀態（被網住、被扛著、正扛著誰…）。</summary>
         public PlayerCapture Capture { get; private set; }
 
+        /// <summary>同一個角色身上的 M4 按 E 動作（破壞、控制台、開出口）。</summary>
+        public PlayerTask Task { get; private set; }
+
         CharacterController m_Controller;
         Renderer[] m_BodyRenderers = new Renderer[0];
         bool m_BodyHidden;
@@ -37,6 +40,12 @@ namespace AnimalEscape.Players
 
         /// <summary>在水裡時外觀往下沉了多少（公尺）。第一人稱的鏡頭也會跟著低一點。</summary>
         public float Sink { get; private set; }
+
+        /// <summary>目前身分的外觀（Visual_身分）。表情動作（PlayerParty）會在它上面加一點位移和旋轉。</summary>
+        public Transform Visual
+        {
+            get { return m_Visual; }
+        }
 
         public RoleSettings Settings
         {
@@ -62,6 +71,7 @@ namespace AnimalEscape.Players
 
             m_Controller = GetComponent<CharacterController>();
             Capture = GetComponent<PlayerCapture>();
+            Task = GetComponent<PlayerTask>();
 
             // 聲音（腳步聲、鈴鐺、叫聲）在生成時才加上，不放在預製物裡：每台電腦各自處理，不需要連線。
             if (GetComponent<PlayerSounds>() == null)
@@ -104,9 +114,8 @@ namespace AnimalEscape.Players
             m_Controller.skinWidth = Mathf.Max(0.01f, settings.radius * 0.08f);
             m_Controller.stepOffset = Mathf.Min(0.3f, height * 0.35f);
 
-            // 被扛著的角色不需要碰撞（位置由 PlayerCapture 直接擺到人類肩上）；出局的角色也不需要。其他情況都要打開。
-            m_Controller.enabled = Capture == null
-                || (Capture.State.Value != CaptureState.Carried && Capture.State.Value != CaptureState.Out);
+            // 被扛著的角色不需要碰撞（位置由 PlayerCapture 直接擺到人類肩上）。其他情況都要打開（在實驗室裡也要）。
+            m_Controller.enabled = Capture == null || Capture.State.Value != CaptureState.Carried;
 
             // 會游泳的身分放在 Swimmer 圖層（不被水域的擋牆擋住）。擁有者端之後由 PlayerMovement 每一格維護。
             gameObject.layer = GameConfig.Instance.CanEnterWater(role) ? GameLayers.Swimmer : 0;
@@ -150,13 +159,6 @@ namespace AnimalEscape.Players
             if (m_Visual != null)
             {
                 m_Visual.localPosition = new Vector3(0f, -Sink, 0f);
-
-                // 出局的角色從場上消失（每台電腦都一樣）。
-                bool show = Capture == null || Capture.State.Value != CaptureState.Out;
-                if (m_Visual.gameObject.activeSelf != show)
-                {
-                    m_Visual.gameObject.SetActive(show);
-                }
             }
         }
 

@@ -13,7 +13,10 @@ namespace AnimalEscape.Players
         Bell = 1,
 
         /// <summary>動物被網住、被關進籠子時的叫聲（所有人聽得到）。</summary>
-        Cry = 2
+        Cry = 2,
+
+        /// <summary>東西被動物弄倒的撞擊聲（M4，提示只給人類）。</summary>
+        Crash = 3
     }
 
     /// <summary>
@@ -43,7 +46,7 @@ namespace AnimalEscape.Players
 
         public static readonly List<Cue> Recent = new List<Cue>();
 
-        static readonly Tally[] s_Tallies = new Tally[3];
+        static readonly Tally[] s_Tallies = new Tally[4];
 
         public static void Add(SoundKind kind, int sourceId, Vector3 position, float loudness, float distance)
         {

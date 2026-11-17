@@ -102,7 +102,6 @@ MonoBehaviour:
   cageSeconds:
   - 120
   - 80
-  - 40
   putInCageRange: 2.8
   rescueSeconds: 3
   rescueRange: 2.4
@@ -112,5 +111,46 @@ MonoBehaviour:
   campRadius: 8
   campSecondsBeforePause: 10
   cageAlarmRadius: 15
+  keycardPickupRange: 1.2
+  keycardPickupDelay: 0.6
+  keycardSwipeSeconds: 5
+  keycardSwipeRange: 2.2
+  labReleaseProtectionSeconds: 5
+  labConsoleRange: 2.4
+  ballKickStrength: 1.6
+  ballKickLift: 2.5
+  emoteSeconds: 2.5
+  emotesOutsideLab: 0
+  matchSeconds: 600
+  truckSeconds: 90
+  chaosSmall: 2
+  chaosMedium: 5
+  chaosLarge: 10
+  breakHearSmall: 15
+  breakHearMedium: 25
+  breakHearLarge: 40
+  breakSecondsMedium: 1.5
+  breakSecondsLarge: 3
+  breakRange: 1.2
+  consoleSeconds: 5
+  consoleChaosReduction: 15
+  consoleCooldown: 60
+  consoleRange: 1.8
+  exitOpenSeconds: 10
+  exitHelperBonus: 0.5
+  exitReach: 2.6
+  humanFootstepRangeRun: 20
+  humanFootstepRangeSneak: 8
+  bellRangeRun: 18
+  bellRangeSneak: 5
+  cryRange: 100
+  runSpeedFraction: 0.65
+  silentBelowSpeed: 0.5
+  footstepIntervalRun: 0.32
+  footstepIntervalSneak: 0.55
+  bellIntervalRun: 0.3
+  bellIntervalSneak: 0.6
+  soundCueSeconds: 2
+  soundVolume: 0.8
   nameTagMaxDistance: 25
   virtualPlayersAutoJoinLocal: 1

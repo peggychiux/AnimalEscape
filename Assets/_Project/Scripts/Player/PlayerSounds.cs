@@ -183,15 +183,15 @@ namespace AnimalEscape.Players
             }
         }
 
-        /// <summary>這台電腦的玩家自己的角色（出局了就是 null：出局的人不聽聲音）。</summary>
-        static PlayerAvatar LocalListener()
+        /// <summary>這台電腦的玩家自己的角色（在實驗室裡就是 null：實驗室有牆有屋頂，裡面的人聽不到外面）。</summary>
+        public static PlayerAvatar LocalListener()
         {
             for (int i = 0; i < PlayerAvatar.All.Count; i++)
             {
                 PlayerAvatar avatar = PlayerAvatar.All[i];
                 if (avatar != null && avatar.IsSpawned && avatar.IsOwner)
                 {
-                    return avatar.Capture != null && avatar.Capture.IsOut ? null : avatar;
+                    return avatar.Capture != null && avatar.Capture.IsInLab ? null : avatar;
                 }
             }
 

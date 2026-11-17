@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 828994744396716253}
   - component: {fileID: 4424430104477828371}
   - component: {fileID: 325174139125205013}
+  - component: {fileID: 1185765689141342330}
   m_Layer: 0
   m_Name: MatchState
   m_TagString: Untagged
@@ -70,4 +71,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 836c43de3b1eb49d5967f85d2fefd920, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AnimalEscape.Match.MatchState
+  ShowTopMostFoldoutHeaderGroup: 1
+  labBallPrefab: {fileID: 2096276335541159607, guid: 280cddec4025f445fbfcf7f28f245fb0, type: 3}
+--- !u!114 &1185765689141342330
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8711430121776195204}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ca389ebfdd30a451aa8e166b847a552f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AnimalEscape.Match.MatchFlow
   ShowTopMostFoldoutHeaderGroup: 1
