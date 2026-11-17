@@ -16,6 +16,15 @@ namespace AnimalEscape.Players
     {
         public static PlayerCamera Instance { get; private set; }
 
+        /// <summary>介面要求放開滑鼠一次（例如按 F1 打開開發者面板）。下一格放開後自動清掉。</summary>
+        public static bool ReleaseCursorRequested { get; set; }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetCursorStatics()
+        {
+            ReleaseCursorRequested = false;
+        }
+
         public Camera Camera { get; private set; }
 
         // 第三人稱：鏡頭離角色比這個距離近時，藏起自己的身體；離得比第二個距離遠才顯示回來。
@@ -217,7 +226,7 @@ namespace AnimalEscape.Players
                 }
                 else if (mouse != null && Cursor.lockState == CursorLockMode.Locked)
                 {
-                    look += mouse.delta.ReadValue() * config.mouseSensitivity;
+                    look += mouse.delta.ReadValue() * UserSettings.MouseLookScale;
                 }
 
                 var gamepad = Gamepad.current;
@@ -228,6 +237,11 @@ namespace AnimalEscape.Players
             }
 
             UpdateAssistedLook(Time.deltaTime);
+
+            if (UserSettings.InvertY)
+            {
+                look.y = -look.y;
+            }
 
             m_Yaw += look.x;
             m_Pitch = ClampPitch(m_Pitch - look.y);
@@ -345,6 +359,18 @@ namespace AnimalEscape.Players
 
             var keyboard = Keyboard.current;
             var mouse = Mouse.current;
+
+            // 選單（測試房間）或 F1 開發者面板開著：滑鼠要放開才點得到按鈕。
+            if (InputGate.MenuOpen || ReleaseCursorRequested)
+            {
+                ReleaseCursorRequested = false;
+                if (Cursor.lockState == CursorLockMode.Locked)
+                {
+                    SetCursorLocked(false);
+                }
+
+                return;
+            }
 
             if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame)
             {

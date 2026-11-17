@@ -151,12 +151,12 @@ namespace AnimalEscape.Players
 
             if (state == CaptureState.Netted || state == CaptureState.Carried)
             {
-                SetGoal(Goal.Struggle, state == CaptureState.Carried ? "被扛著" : "被網住");
+                SetGoal(Goal.Struggle, m_Capture.IsAsleep ? "麻醉睡著" : (state == CaptureState.Carried ? "被扛著" : "被網住"));
                 StopMoving();
                 m_HoldTask = false;
                 m_HoldPick = false;
                 ApplyHolds();
-                if (now >= m_NextStruggleAt)
+                if (now >= m_NextStruggleAt && !m_Capture.IsAsleep)
                 {
                     m_Capture.RequestStruggle();
                     float interval = 1f / Mathf.Max(1f, GameConfig.Instance.botStrugglePerSecond);

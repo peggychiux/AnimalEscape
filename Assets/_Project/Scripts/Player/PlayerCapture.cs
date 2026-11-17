@@ -45,6 +45,12 @@ namespace AnimalEscape.Players
         /// <summary>（動物）關在幾號籠（1～5）；0 表示沒有被關。和 DropPoint 一樣要宣告在 State 前面。</summary>
         public readonly NetworkVariable<int> CageNumber = new NetworkVariable<int>(0);
 
+        /// <summary>
+        /// （動物）被麻醉、睡到什麼時候（主機時間）；沒有被麻醉是 -100。人類扛起被網住的動物時打麻醉針，
+        /// 睡著時不能掙扎，睡醒就自己跳下來。要宣告在 State 前面：變成「被扛著」的那一刻，大家已經知道牠睡著了。
+        /// </summary>
+        public readonly NetworkVariable<double> SleepUntil = new NetworkVariable<double>(-100.0);
+
         public readonly NetworkVariable<CaptureState> State = new NetworkVariable<CaptureState>(CaptureState.Free);
 
         /// <summary>（動物，在籠子裡）倒數還剩幾秒。主機每 0.1 秒同步一次。</summary>
@@ -151,6 +157,18 @@ namespace AnimalEscape.Players
         public bool IsHeld
         {
             get { return State.Value == CaptureState.Netted || State.Value == CaptureState.Carried; }
+        }
+
+        /// <summary>（動物）被麻醉睡著了（被扛著，或被放回地上還沒醒）。睡著時不能掙扎。</summary>
+        public bool IsAsleep
+        {
+            get { return IsHeld && SleepUntil.Value > 0.0 && Now < SleepUntil.Value; }
+        }
+
+        /// <summary>（動物）還要睡幾秒。</summary>
+        public float SleepRemaining
+        {
+            get { return IsAsleep ? (float)(SleepUntil.Value - Now) : 0f; }
         }
 
         /// <summary>（動物）是不是被送進實驗室了。</summary>
@@ -405,10 +423,10 @@ namespace AnimalEscape.Players
             }
         }
 
-        /// <summary>（動物）掙扎一下。被網住或被扛著時才有用。</summary>
+        /// <summary>（動物）掙扎一下。被網住或被扛著時才有用；被麻醉睡著時沒用。</summary>
         public void RequestStruggle()
         {
-            if (IsSpawned && IsOwner && IsHeld)
+            if (IsSpawned && IsOwner && IsHeld && !IsAsleep)
             {
                 StruggleRpc();
             }
@@ -436,7 +454,7 @@ namespace AnimalEscape.Players
         void ReadInput()
         {
             // 視窗不在最前面時不讀取輸入（同一台電腦開多個視窗測試時，只有正在操作的那個視窗有反應）。
-            if (m_InteractAction == null || !Application.isFocused)
+            if (m_InteractAction == null || !InputGate.GameInputAllowed)
             {
                 return;
             }
@@ -581,6 +599,15 @@ namespace AnimalEscape.Players
                 {
                     ServerRelease(CaptureState.Free, GroundPointBelow(transform.position), true);
                 }
+                else if (SleepUntil.Value > 0.0)
+                {
+                    ServerUpdateSleep(config);
+                }
+            }
+            else if (SleepUntil.Value > 0.0)
+            {
+                // 已經不是被網住或被扛著（關進籠子、被救、重新開始…）：麻醉跟著結束。
+                SleepUntil.Value = -100.0;
             }
 
             if (CarryingId.Value != None && Carried == null)
@@ -726,7 +753,53 @@ namespace AnimalEscape.Players
             m_StruggleSyncTimer = 0.1f;
             Struggle.Value = 0f;
             CarrierId.Value = None;
+            SleepUntil.Value = -100.0;
             State.Value = CaptureState.Netted;
+        }
+
+        /// <summary>
+        /// 主機端（被麻醉、還在人類手上或地上時，每一格）：時間到就醒來跳下來（和自己掙脫一樣：人類踉蹌、動物有保護）；
+        /// 睡在地上時，自由的隊友走過來碰到牠，就把牠叫醒。被扛著時，隊友要照原本的推撞規則撞人類才行。
+        /// </summary>
+        void ServerUpdateSleep(GameConfig config)
+        {
+            if (Now >= SleepUntil.Value)
+            {
+                SleepUntil.Value = -100.0;
+                ServerBreakFree(false);
+                return;
+            }
+
+            if (State.Value != CaptureState.Netted || m_Avatar == null)
+            {
+                return;
+            }
+
+            Vector3 here = transform.position;
+            for (int i = 0; i < PlayerAvatar.All.Count; i++)
+            {
+                PlayerAvatar other = PlayerAvatar.All[i];
+                PlayerCapture capture = other != null && other.IsSpawned ? other.Capture : null;
+                if (capture == null || capture == this || capture.IsHuman || capture.State.Value != CaptureState.Free)
+                {
+                    continue;
+                }
+
+                Vector3 offset = other.transform.position - here;
+                if (Mathf.Abs(offset.y) > 1.2f)
+                {
+                    continue;
+                }
+
+                offset.y = 0f;
+                float touching = m_Avatar.Settings.radius + other.Settings.radius + config.tranqWakeTouchReach;
+                if (offset.magnitude <= touching)
+                {
+                    SleepUntil.Value = -100.0;
+                    ServerBreakFree(false);
+                    return;
+                }
+            }
         }
 
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
@@ -757,6 +830,16 @@ namespace AnimalEscape.Players
             PlayerCapture target = FindPickupTarget();
             if (target != null)
             {
+                // 麻醉針：扛起來的同時打一針，睡著時不能掙扎（地上掙扎到一半的進度也不帶上肩）。
+                // 已經睡著的（被放下來還沒醒）不會再打一次，照原本的時間醒來。
+                GameConfig config = GameConfig.Instance;
+                if (config.tranquilizeOnPickup && !target.IsAsleep)
+                {
+                    target.SleepUntil.Value = Now + config.tranqSleepSeconds;
+                    target.m_StruggleExact = 0f;
+                    target.Struggle.Value = 0f;
+                }
+
                 target.CarrierId.Value = NetworkObjectId;
                 target.State.Value = CaptureState.Carried;
                 CarryingId.Value = target.NetworkObjectId;
@@ -766,7 +849,7 @@ namespace AnimalEscape.Players
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         void StruggleRpc()
         {
-            if (!IsHeld)
+            if (!IsHeld || IsAsleep)
             {
                 return;
             }
@@ -858,6 +941,7 @@ namespace AnimalEscape.Players
             animal.CarrierId.Value = None;
             animal.m_StruggleExact = 0f;
             animal.Struggle.Value = 0f;
+            animal.SleepUntil.Value = -100.0;
 
             float seconds = config.GetCageSeconds(times);
             bool releasedBefore = slot != null && slot.ReleasedFromLab.Value;
@@ -998,6 +1082,7 @@ namespace AnimalEscape.Players
             CageNumber.Value = 0;
             CagePaused.Value = false;
             CageTimeLeft.Value = 0f;
+            SleepUntil.Value = -100.0;
             ProtectedUntil.Value = -100.0;
             SlowUntil.Value = -100.0;
             StaggerUntil.Value = -100.0;
@@ -1014,6 +1099,26 @@ namespace AnimalEscape.Players
         /// <summary>（擁有者）把自己搬到指定的位置。CharacterController 要先停用，不然下一次移動會被拉回原處。</summary>
         [Rpc(SendTo.Owner)]
         void MoveToRpc(Vector3 position, Quaternion rotation)
+        {
+            MoveNow(position, rotation);
+        }
+
+        /// <summary>
+        /// （擁有者）把自己的角色直接搬到指定的位置（測試模式 F1 面板的瞬移）。
+        /// 只搬位置，不改狀態；被扛著時不搬（位置跟著人類）。
+        /// </summary>
+        public bool OwnerTeleport(Vector3 position, Quaternion rotation)
+        {
+            if (!IsOwner || State.Value == CaptureState.Carried)
+            {
+                return false;
+            }
+
+            MoveNow(position, rotation);
+            return true;
+        }
+
+        void MoveNow(Vector3 position, Quaternion rotation)
         {
             if (m_Controller != null)
             {
@@ -1212,6 +1317,7 @@ namespace AnimalEscape.Players
             {
                 m_StruggleExact = 0f;
                 Struggle.Value = 0f;
+                SleepUntil.Value = -100.0;
                 if (protect)
                 {
                     ProtectedUntil.Value = Now + GameConfig.Instance.breakFreeProtectionSeconds;

@@ -19,10 +19,11 @@ namespace AnimalEscape.Networking
     }
 
     /// <summary>
-    /// 負責開房間與加入房間。有兩種房間：
-    /// 1. 本機房間：直接用 IP 連線，不需要任何雲端設定，給同一台電腦或同一個區域網路測試用。
-    /// 2. 線上房間：透過 Unity 的 Relay（Multiplayer Services 的 Session），用代碼加入，給不同電腦連線用。
-    /// 兩種都是「主機模式」：開房間的人同時是主機，所有判定之後都由主機處理。
+    /// 負責開房間與加入房間。有三種連法（主選單選）：
+    /// 1. 只用這台電腦：只聽 127.0.0.1，同一台電腦的其他視窗（Multiplayer Play Mode）加得進來。
+    /// 2. 同一個 Wi-Fi：直接用 IP 連線，不需要任何雲端設定；房間會在區域網路上廣播（LanDiscovery），別人在「附近的房間」看得到。
+    /// 3. 線上：透過 Unity 的 Relay（Multiplayer Services 的 Session），用代碼加入，給不同地方的電腦連線用。
+    /// 都是「主機模式」：開房間的人同時是主機，所有判定都由主機處理。
     /// </summary>
     public class ConnectionManager : MonoBehaviour
     {
@@ -37,6 +38,15 @@ namespace AnimalEscape.Networking
         public string JoinCode { get; private set; } = "";
 
         public bool IsOnlineRoom { get; private set; }
+
+        /// <summary>現在（或上一個）房間的連法。</summary>
+        public LinkMode Link { get; private set; } = LinkMode.Lan;
+
+        /// <summary>同一個 Wi-Fi 找房間／廣播房間。</summary>
+        public LanDiscovery Lan { get; private set; }
+
+        /// <summary>這台電腦在區域網路上的 IP（開了「同一個 Wi-Fi」的房間時顯示給別人輸入）。</summary>
+        public string LocalAddress { get; private set; } = "";
 
         NetworkManager m_Net;
         Mps.ISession m_Session;
@@ -55,6 +65,18 @@ namespace AnimalEscape.Networking
         bool m_WroteMarker;
         long m_StaleMarkerTicks;
 
+        /// <summary>沒有連線、上一個連線也已經關乾淨了，可以馬上開新房間或加入。</summary>
+        public bool IsIdle
+        {
+            get { return State == ConnectionState.Offline && m_Net != null && !m_Net.IsListening && !m_Net.ShutdownInProgress; }
+        }
+
+        /// <summary>這個視窗是 Multiplayer Play Mode 的虛擬玩家（測試用的第二個視窗）。</summary>
+        public bool IsVirtualPlayerWindow
+        {
+            get { return IsVirtualPlayer(); }
+        }
+
         /// <summary>這是虛擬玩家視窗，正在等主視窗開本機房間（開了就會自動加入）。</summary>
         public bool IsWaitingForLocalHost
         {
@@ -65,6 +87,7 @@ namespace AnimalEscape.Networking
         {
             Instance = this;
             Application.runInBackground = true;
+            Lan = new LanDiscovery(GameConfig.Instance.lanDiscoveryPort);
         }
 
         void Start()
@@ -100,6 +123,11 @@ namespace AnimalEscape.Networking
         void OnDestroy()
         {
             DeleteLocalHostMarker();
+            if (Lan != null)
+            {
+                Lan.Dispose();
+            }
+
             if (m_Net != null)
             {
                 m_Net.OnClientConnectedCallback -= OnClientConnected;
@@ -115,6 +143,8 @@ namespace AnimalEscape.Networking
 
         void Update()
         {
+            Lan.Tick();
+
             // 保險：就算沒收到連線事件，只要確認已連上就切換狀態。
             if (State == ConnectionState.Connecting && m_Net != null && m_Net.IsListening && m_Net.IsConnectedClient)
             {
@@ -137,7 +167,26 @@ namespace AnimalEscape.Networking
         // 本機房間（直接連線）
         // ------------------------------------------------------------------
 
+        /// <summary>照連法開房間：只用這台電腦、同一個 Wi-Fi、或線上。房間種類和比賽時間先寫在 RoomOptions。</summary>
+        public void StartHost(LinkMode link)
+        {
+            if (link == LinkMode.Online)
+            {
+                CreateOnlineRoom();
+            }
+            else
+            {
+                StartLocalHost(link);
+            }
+        }
+
+        /// <summary>開「同一個 Wi-Fi」的房間（測試工具的 host 指令和舊的按鈕用）。</summary>
         public void StartLocalHost()
+        {
+            StartLocalHost(LinkMode.Lan);
+        }
+
+        public void StartLocalHost(LinkMode link)
         {
             m_AutoJoinLocal = false;
             if (!CanStart())
@@ -151,28 +200,73 @@ namespace AnimalEscape.Networking
                 return;
             }
 
-            // 監聽 0.0.0.0，同一個區域網路的其他電腦也能用這台電腦的 IP 加入。
-            transport.SetConnectionData("127.0.0.1", GameConfig.Instance.localPort, "0.0.0.0");
+            // 同一個 Wi-Fi：監聽 0.0.0.0，其他電腦也能用這台電腦的 IP 加入。只用這台電腦：只聽 127.0.0.1。
+            bool lan = link != LinkMode.ThisComputer;
+            transport.SetConnectionData("127.0.0.1", GameConfig.Instance.localPort, lan ? "0.0.0.0" : "127.0.0.1");
             transport.MaxConnectAttempts = m_DefaultConnectAttempts;
-            Begin(false, "正在建立本機房間…");
+            Begin(false, "正在建立房間…");
+            Link = lan ? LinkMode.Lan : LinkMode.ThisComputer;
+            LocalAddress = lan ? LanDiscovery.FindLocalAddress() : "";
             if (m_Net.StartHost())
             {
                 WriteLocalHostMarker();
+                if (lan)
+                {
+                    Lan.StartResponder(DescribeRoomForLan);
+                }
             }
             else
             {
-                Fail("無法建立本機房間（連接埠可能被占用，或已經有另一個視窗開了房間）。");
+                Fail("無法建立房間（連接埠可能被占用，或已經有另一個視窗開了房間）。");
             }
         }
 
         public void StartLocalClient(string address)
         {
+            StartLocalClient(address, GameConfig.Instance.localPort);
+        }
+
+        public void StartLocalClient(string address, ushort port)
+        {
             m_AutoJoinLocal = false;
             address = string.IsNullOrWhiteSpace(address) ? "127.0.0.1" : address.Trim();
-            ConnectLocalClient(address, "正在連線到 " + address + "…", k_ManualConnectAttempts);
+            ConnectLocalClient(address, "正在連線到 " + address + "…", k_ManualConnectAttempts, port);
+        }
+
+        /// <summary>加入「附近的房間」列表裡的一個房間。</summary>
+        public void JoinLanRoom(LanRoomInfo room)
+        {
+            if (room != null)
+            {
+                StartLocalClient(room.Address, room.Port != 0 ? room.Port : GameConfig.Instance.localPort);
+            }
+        }
+
+        /// <summary>給「附近的房間」列表的房間資料：名稱、地圖、人數、上限、狀態、是不是測試房間、連接埠。</summary>
+        string[] DescribeRoomForLan()
+        {
+            string map = AnimalEscape.Core.MapRegistry.Instance != null && AnimalEscape.Core.MapRegistry.Instance.Active != null
+                ? AnimalEscape.Core.MapRegistry.Instance.Active.displayName
+                : "";
+            int players = m_Net != null && m_Net.IsServer ? m_Net.ConnectedClientsIds.Count + RoomStatus.BotCount : 0;
+            return new[]
+            {
+                RoomStatus.RoomName,
+                map,
+                players.ToString(),
+                GameConfig.Instance.maxPlayers.ToString(),
+                RoomStatus.PhaseText,
+                RoomStatus.IsTestRoom ? "1" : "0",
+                GameConfig.Instance.localPort.ToString()
+            };
         }
 
         void ConnectLocalClient(string address, string message, int maxAttempts)
+        {
+            ConnectLocalClient(address, message, maxAttempts, GameConfig.Instance.localPort);
+        }
+
+        void ConnectLocalClient(string address, string message, int maxAttempts, ushort port)
         {
             if (!CanStart())
             {
@@ -185,9 +279,11 @@ namespace AnimalEscape.Networking
                 return;
             }
 
-            transport.SetConnectionData(address, GameConfig.Instance.localPort);
+            transport.SetConnectionData(address, port);
             transport.MaxConnectAttempts = maxAttempts;
             Begin(false, message);
+            Link = address == "127.0.0.1" ? LinkMode.ThisComputer : LinkMode.Lan;
+            LocalAddress = "";
             if (!m_Net.StartClient())
             {
                 Fail("無法開始連線，請確認位址是否正確。");
@@ -208,6 +304,8 @@ namespace AnimalEscape.Networking
 
             RestoreDefaultConnectAttempts();
             int attempt = Begin(true, "正在建立線上房間…");
+            Link = LinkMode.Online;
+            LocalAddress = "";
             try
             {
                 await EnsureSignedInAsync();
@@ -252,6 +350,8 @@ namespace AnimalEscape.Networking
 
             RestoreDefaultConnectAttempts();
             int attempt = Begin(true, "正在加入線上房間…");
+            Link = LinkMode.Online;
+            LocalAddress = "";
             try
             {
                 await EnsureSignedInAsync();
@@ -280,6 +380,15 @@ namespace AnimalEscape.Networking
         // ------------------------------------------------------------------
         // 離開
         // ------------------------------------------------------------------
+
+        /// <summary>清掉狀態訊息（換畫面時用）。</summary>
+        public void ClearStatus()
+        {
+            if (State == ConnectionState.Offline)
+            {
+                StatusMessage = "";
+            }
+        }
 
         public async void Leave()
         {
@@ -556,6 +665,7 @@ namespace AnimalEscape.Networking
             State = ConnectionState.Offline;
             JoinCode = "";
             DeleteLocalHostMarker();
+            Lan.StopResponder();
 
             if (m_AutoJoinLocal && previous == ConnectionState.Connecting)
             {

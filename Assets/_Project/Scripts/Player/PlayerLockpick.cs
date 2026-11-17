@@ -157,7 +157,7 @@ namespace AnimalEscape.Players
         {
             // 視窗不在最前面時不讀鍵盤（同一台電腦開多個視窗測試時，只有正在操作的那個視窗有反應）。
             bool hold = m_ExternalHold
-                || (Application.isFocused && m_HoldAction != null && m_HoldAction.IsPressed());
+                || (InputGate.GameInputAllowed && m_HoldAction != null && m_HoldAction.IsPressed());
             // 同時站在籠子旁邊、實驗室門口和收容區門邊時（很少見），按 E 是救人優先、刷卡其次。
             bool rescueFirst = (m_Rescue != null && m_Rescue.CageInReach != null)
                 || (m_Keycard != null && m_Keycard.DoorInReach != null && PlayerKeycard.LabHasAnimals());

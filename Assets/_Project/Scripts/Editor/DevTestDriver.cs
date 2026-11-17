@@ -399,7 +399,95 @@ namespace AnimalEscape.EditorTools
                     break;
 
                 case "host":
+                    // 測試工具的 host 一律開正式房間（同一個 Wi-Fi）；測試房間用 menu test。
+                    RoomOptions.UseOfficialDefaults();
                     StartConnection(label, true);
+                    break;
+
+                case "menu":
+                    RunMenu(label, args);
+                    break;
+
+                case "create":
+                {
+                    // 開始遊戲 › 建立房間：create lan|online [分鐘]
+                    LinkMode link = args.Length > 0 && args[0].ToLowerInvariant() == "online" ? LinkMode.Online : LinkMode.Lan;
+                    int minutes = args.Length > 1 ? Mathf.RoundToInt(Number(args, 1)) : 10;
+                    LobbyUI.CreateOfficialRoom(link, minutes);
+                    Report(label, "按了建立房間（" + link + "，" + minutes + " 分鐘）");
+                    break;
+                }
+
+                case "link":
+                {
+                    // 測試房間換連法：link thiscomputer|lan|online
+                    LinkMode link;
+                    if (!TryParseLink(args.Length > 0 ? args[0] : "", out link))
+                    {
+                        Report(label, "失敗：要寫 thiscomputer、lan 或 online");
+                        break;
+                    }
+
+                    LobbyUI.ChangeTestLink(link);
+                    Report(label, "測試房間換成 " + link);
+                    break;
+                }
+
+                case "lan":
+                    RunLan(label, args);
+                    break;
+
+                case "joinip":
+                    if (ConnectionManager.Instance != null)
+                    {
+                        ConnectionManager.Instance.StartLocalClient(args.Length > 0 ? args[0] : "127.0.0.1");
+                        Report(label, "連線到 " + (args.Length > 0 ? args[0] : "127.0.0.1"));
+                    }
+
+                    break;
+
+                case "rule":
+                    RunRule(label, args);
+                    break;
+
+                case "phase":
+                    RunPhase(label, args);
+                    break;
+
+                case "begintest":
+                {
+                    MatchState match = MatchState.Instance;
+                    if (match == null || !match.IsServer)
+                    {
+                        Report(label, "失敗：要在測試房間的主機上");
+                        break;
+                    }
+
+                    string reason;
+                    bool started = match.ServerBeginTest(out reason);
+                    Report(label, started ? "開始測試（從 " + match.StartPhase.Value + "）" : "不能開始：" + reason);
+                    break;
+                }
+
+                case "setup":
+                    Report(label, DevActions.ReturnToSetup());
+                    break;
+
+                case "assign":
+                    RunAssign(label, args);
+                    break;
+
+                case "devpanel":
+                    DevPanel.SetOpen(args.Length == 0 || args[0].ToLowerInvariant() != "off");
+                    Report(label, DevPanel.Open ? "F1 面板開著" : "F1 面板關著" + (DevActions.Available ? "" : "（不是測試房間）"));
+                    break;
+
+                case "dev":
+                    RunDev(label, args);
+                    break;
+
+                case "setting":
+                    RunSetting(label, args);
                     break;
 
                 case "join":
@@ -834,6 +922,340 @@ namespace AnimalEscape.EditorTools
             }
         }
 
+        // ------------------------------------------------------------------
+        // 主選單、測試房間、F1 面板
+        // ------------------------------------------------------------------
+
+        static bool TryParseLink(string text, out LinkMode link)
+        {
+            switch ((text ?? "").ToLowerInvariant())
+            {
+                case "thiscomputer":
+                case "local":
+                case "this":
+                    link = LinkMode.ThisComputer;
+                    return true;
+                case "lan":
+                case "wifi":
+                    link = LinkMode.Lan;
+                    return true;
+                case "online":
+                    link = LinkMode.Online;
+                    return true;
+                default:
+                    link = LinkMode.Lan;
+                    return false;
+            }
+        }
+
+        /// <summary>menu main|play|test|settings|help（切畫面；test 會開測試房間）、menu hover 0～4（主畫面右邊的說明）。</summary>
+        static void RunMenu(string label, string[] args)
+        {
+            string which = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+            switch (which)
+            {
+                case "main":
+                    LobbyUI.BackToMain();
+                    break;
+                case "play":
+                    LobbyUI.CurrentScreen = LobbyUI.MenuScreen.Play;
+                    break;
+                case "test":
+                    LobbyUI.EnterTestMode();
+                    break;
+                case "settings":
+                    LobbyUI.CurrentScreen = LobbyUI.MenuScreen.Settings;
+                    break;
+                case "help":
+                    LobbyUI.CurrentScreen = LobbyUI.MenuScreen.Help;
+                    break;
+                case "hover":
+                    LobbyUI.HoveredItem = Mathf.RoundToInt(Number(args, 1));
+                    break;
+                default:
+                    Report(label, "失敗：要寫 main、play、test、settings、help 或 hover N");
+                    return;
+            }
+
+            Report(label, "畫面=" + LobbyUI.CurrentScreen + (which == "hover" ? " 說明=" + LobbyUI.HoveredItem : ""));
+        }
+
+        /// <summary>lan（列出附近的房間；不在「開始遊戲」畫面時先切過去）、lan join N（加入第 N 個）。</summary>
+        static void RunLan(string label, string[] args)
+        {
+            ConnectionManager connection = ConnectionManager.Instance;
+            if (connection == null)
+            {
+                Report(label, "失敗：不在 Play 模式");
+                return;
+            }
+
+            var rooms = connection.Lan.Rooms;
+            if (args.Length > 0 && args[0].ToLowerInvariant() == "join")
+            {
+                int index = Mathf.RoundToInt(Number(args, 1)) - 1;
+                if (index < 0 || index >= rooms.Count)
+                {
+                    Report(label, "失敗：列表裡沒有第 " + (index + 1) + " 個房間（現在 " + rooms.Count + " 個）");
+                    return;
+                }
+
+                connection.JoinLanRoom(rooms[index]);
+                Report(label, "加入 " + rooms[index].Name + "（" + rooms[index].Address + ":" + rooms[index].Port + "）");
+                return;
+            }
+
+            if (connection.State == ConnectionState.Offline && LobbyUI.CurrentScreen != LobbyUI.MenuScreen.Play)
+            {
+                LobbyUI.CurrentScreen = LobbyUI.MenuScreen.Play;
+            }
+
+            var builder = new StringBuilder("附近的房間 ").Append(rooms.Count).Append(" 個")
+                .Append(connection.Lan.IsSearching ? "（找房間中）" : "（沒在找）")
+                .Append(connection.Lan.IsResponding ? "（這台在廣播房間）" : "");
+            if (!string.IsNullOrEmpty(connection.Lan.LastError))
+            {
+                builder.Append(" 錯誤=").Append(connection.Lan.LastError);
+            }
+
+            for (int i = 0; i < rooms.Count; i++)
+            {
+                var room = rooms[i];
+                builder.Append("\n    ").Append(i + 1).Append(". ").Append(room.Name).Append(room.IsTest ? "（測試）" : "")
+                    .Append('｜').Append(room.Map).Append('｜').Append(room.Players).Append('/').Append(room.MaxPlayers)
+                    .Append('｜').Append(room.Status).Append('｜').Append(room.Address).Append(':').Append(room.Port);
+            }
+
+            Report(label, builder.ToString());
+        }
+
+        /// <summary>rule selfpick|dup|swap|noteam on|off（測試房間的規則開關；還沒開房時改選項）。</summary>
+        static void RunRule(string label, string[] args)
+        {
+            TestRule rule;
+            switch (args.Length > 0 ? args[0].ToLowerInvariant() : "")
+            {
+                case "selfpick":
+                    rule = TestRule.SelfPick;
+                    break;
+                case "dup":
+                    rule = TestRule.DuplicateRoles;
+                    break;
+                case "swap":
+                    rule = TestRule.SwapAnytime;
+                    break;
+                case "noteam":
+                    rule = TestRule.NoTeamNeeded;
+                    break;
+                default:
+                    Report(label, "失敗：要寫 selfpick、dup、swap 或 noteam，後面接 on／off");
+                    return;
+            }
+
+            bool on = args.Length < 2 || args[1].ToLowerInvariant() != "off";
+            MatchState match = MatchState.Instance;
+            if (match != null && match.IsSpawned)
+            {
+                if (!match.IsServer || !match.IsTest)
+                {
+                    Report(label, "失敗：要在測試房間的主機上");
+                    return;
+                }
+
+                match.ServerSetRule(rule, on);
+            }
+            else
+            {
+                RoomOptions.Rules = on ? (RoomOptions.Rules | rule) : (RoomOptions.Rules & ~rule);
+            }
+
+            Report(label, rule + (on ? " 開" : " 關") + "｜規則=" + (match != null && match.IsSpawned ? ((TestRule)match.TestRules.Value).ToString() : RoomOptions.Rules.ToString()));
+        }
+
+        /// <summary>phase lobby|start|escaped|chaos|exit（測試房間的「從哪裡開始」）。</summary>
+        static void RunPhase(string label, string[] args)
+        {
+            TestStart phase;
+            switch (args.Length > 0 ? args[0].ToLowerInvariant() : "")
+            {
+                case "lobby":
+                    phase = TestStart.Lobby;
+                    break;
+                case "start":
+                    phase = TestStart.MatchStart;
+                    break;
+                case "escaped":
+                    phase = TestStart.Escaped;
+                    break;
+                case "chaos":
+                    phase = TestStart.ChaosFull;
+                    break;
+                case "exit":
+                    phase = TestStart.ExitOpen;
+                    break;
+                default:
+                    Report(label, "失敗：要寫 lobby、start、escaped、chaos 或 exit");
+                    return;
+            }
+
+            MatchState match = MatchState.Instance;
+            if (match != null && match.IsSpawned && match.IsServer)
+            {
+                match.ServerSetStartPhase(phase);
+            }
+            else
+            {
+                RoomOptions.StartPhase = phase;
+            }
+
+            Report(label, "從哪裡開始=" + phase);
+        }
+
+        /// <summary>assign P2 Rabbit（測試房間的房主幫別人選身分；None 是「只看」）。</summary>
+        static void RunAssign(string label, string[] args)
+        {
+            Role role;
+            if (args.Length < 2 || !Enum.TryParse(args[1], true, out role))
+            {
+                Report(label, "失敗：要寫 assign P2 Rabbit 這樣");
+                return;
+            }
+
+            int number;
+            int.TryParse(args[0].TrimStart('P', 'p'), NumberStyles.Integer, CultureInfo.InvariantCulture, out number);
+            PlayerSlot target = null;
+            for (int i = 0; i < PlayerSlot.All.Count; i++)
+            {
+                if (PlayerSlot.All[i] != null && PlayerSlot.All[i].PlayerNumber == number)
+                {
+                    target = PlayerSlot.All[i];
+                }
+            }
+
+            if (target == null || PlayerSpawner.Instance == null || !DevActions.IsHost)
+            {
+                Report(label, "失敗：要在主機上，而且房間裡要有 P" + number);
+                return;
+            }
+
+            bool ok = PlayerSpawner.Instance.AssignRole(target, role);
+            Report(label, ok ? "P" + number + " 換成 " + role : "P" + number + " 換不了 " + role + "（身分重複或比賽中）");
+        }
+
+        /// <summary>
+        /// F1 面板的按鈕：dev time 2 30｜pause｜chaos 40｜chaos+10｜full｜openexit｜truck10｜restore｜swap Monkey｜
+        /// habitats｜mylab｜release｜tp exit|lab|cage|spawn｜nextmap｜restart｜setup。
+        /// </summary>
+        static void RunDev(string label, string[] args)
+        {
+            string action = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+            string result;
+            switch (action)
+            {
+                case "time":
+                    result = DevPanel.ApplyTimeForTest(Mathf.RoundToInt(Number(args, 1)), Mathf.RoundToInt(Number(args, 2)));
+                    break;
+                case "pause":
+                    result = DevActions.TogglePause();
+                    break;
+                case "chaos":
+                    result = DevActions.SetChaos(Number(args, 1));
+                    break;
+                case "chaos+10":
+                    result = DevActions.AddChaos(10f);
+                    break;
+                case "full":
+                    result = DevActions.SetChaos(100f);
+                    break;
+                case "openexit":
+                    result = DevActions.OpenExit();
+                    break;
+                case "truck10":
+                    result = DevActions.TruckTenSeconds();
+                    break;
+                case "restore":
+                    result = DevActions.RestoreBreakables();
+                    break;
+                case "swap":
+                {
+                    Role role;
+                    result = args.Length > 1 && Enum.TryParse(args[1], true, out role) && role != Role.None
+                        ? DevActions.SwapRoleInPlace(role)
+                        : "失敗：要寫 dev swap Monkey 這樣";
+                    break;
+                }
+
+                case "habitats":
+                    result = DevActions.Request(DevRequest.OpenAllHabitats);
+                    break;
+                case "mylab":
+                    result = DevActions.Request(DevRequest.SendMeToLab);
+                    break;
+                case "release":
+                    result = DevActions.Request(DevRequest.ReleaseMe);
+                    break;
+                case "tp":
+                {
+                    string where = args.Length > 1 ? args[1].ToLowerInvariant() : "";
+                    DevActions.Spot spot = where == "exit" ? DevActions.Spot.Exit
+                        : where == "lab" ? DevActions.Spot.LabDoor
+                        : where == "cage" ? DevActions.Spot.NearestCage
+                        : DevActions.Spot.Spawn;
+                    result = DevActions.Teleport(spot);
+                    break;
+                }
+
+                case "nextmap":
+                    result = DevActions.NextMap();
+                    break;
+                case "restart":
+                    result = DevActions.RestartRound();
+                    break;
+                case "setup":
+                    result = DevActions.ReturnToSetup();
+                    break;
+                default:
+                    result = "失敗：看不懂 dev " + action;
+                    break;
+            }
+
+            PlayerSlot local = PlayerSlot.Local;
+            string reply = local != null && Time.unscaledTime - local.DevReplyTime < 3f ? "｜上一個回覆=" + local.DevReply : "";
+            Report(label, result + reply);
+        }
+
+        /// <summary>setting sens 7｜turn 200｜invert on|off｜volume 50｜fullscreen on|off｜reset｜show。</summary>
+        static void RunSetting(string label, string[] args)
+        {
+            string which = args.Length > 0 ? args[0].ToLowerInvariant() : "show";
+            bool on = args.Length < 2 || args[1].ToLowerInvariant() != "off";
+            switch (which)
+            {
+                case "sens":
+                    UserSettings.MouseSensitivity = Mathf.RoundToInt(Number(args, 1));
+                    break;
+                case "turn":
+                    UserSettings.TurnSpeed = Mathf.RoundToInt(Number(args, 1));
+                    break;
+                case "invert":
+                    UserSettings.InvertY = on;
+                    break;
+                case "volume":
+                    UserSettings.Volume = Mathf.RoundToInt(Number(args, 1));
+                    break;
+                case "fullscreen":
+                    UserSettings.Fullscreen = on;
+                    break;
+                case "reset":
+                    UserSettings.ResetToDefaults();
+                    break;
+            }
+
+            Report(label, "設定：靈敏度=" + UserSettings.MouseSensitivity + "（倍率 " + Format(UserSettings.MouseLookScale) + "）轉速="
+                + UserSettings.TurnSpeed + " 反轉=" + UserSettings.InvertY + " 音量=" + UserSettings.Volume + "（AudioListener "
+                + Format(AudioListener.volume) + "）全螢幕=" + UserSettings.Fullscreen);
+        }
+
         static void StartConnection(string label, bool host)
         {
             double deadline = EditorApplication.timeSinceStartup + 15.0;
@@ -915,7 +1337,7 @@ namespace AnimalEscape.EditorTools
 
                 if (local != null && local.DeniedRole == role && local.DeniedTime >= requestTime)
                 {
-                    Report(label, "被拒絕：" + role + "（已經有人選了）");
+                    Report(label, "被拒絕：" + role + "（" + PlayerSlot.DescribeDenial(local.DeniedRole, local.DeniedReason) + "）");
                     return true;
                 }
 
@@ -2050,9 +2472,10 @@ namespace AnimalEscape.EditorTools
             }
 
             var builder = new StringBuilder("比賽=").Append(flow.Phase.Value);
+            builder.Append(" 一局=").Append(Format(flow.MatchSeconds.Value)).Append("s");
             if (flow.IsPlaying)
             {
-                builder.Append(" 剩=").Append(Format(flow.TimeLeft)).Append("s");
+                builder.Append(" 剩=").Append(Format(flow.TimeLeft)).Append("s").Append(flow.TimerPaused ? "（暫停）" : "");
             }
 
             int broken = 0;
@@ -2352,7 +2775,38 @@ namespace AnimalEscape.EditorTools
             ConnectionManager connection = ConnectionManager.Instance;
             if (connection != null)
             {
-                builder.Append("｜連線=").Append(connection.State);
+                builder.Append("｜連線=").Append(connection.State).Append('/').Append(connection.Link);
+                if (!string.IsNullOrEmpty(connection.LocalAddress))
+                {
+                    builder.Append(" IP=").Append(connection.LocalAddress);
+                }
+
+                if (!string.IsNullOrEmpty(connection.JoinCode))
+                {
+                    builder.Append(" 代碼=").Append(connection.JoinCode);
+                }
+
+                if (!string.IsNullOrEmpty(connection.StatusMessage))
+                {
+                    builder.Append(" 訊息=").Append(connection.StatusMessage);
+                }
+
+                builder.Append("｜選單=").Append(LobbyUI.CurrentScreen);
+                if (MatchState.Instance != null && MatchState.Instance.IsSpawned)
+                {
+                    MatchState room = MatchState.Instance;
+                    builder.Append("｜房間=").Append(room.Mode.Value).Append('/').Append(room.RoomLink.Value);
+                    if (room.IsTest)
+                    {
+                        builder.Append(" 規則=").Append((TestRule)room.TestRules.Value).Append(" 開始=").Append(room.StartPhase.Value)
+                            .Append(room.InTestSetup.Value ? " 設定畫面開著" : " 設定畫面關著");
+                    }
+                }
+
+                if (DevPanel.Open)
+                {
+                    builder.Append("｜F1 面板開著");
+                }
             }
 
             if (MapRegistry.Instance != null && MapRegistry.Instance.Active != null)
@@ -2565,6 +3019,10 @@ namespace AnimalEscape.EditorTools
             if (capture.IsHeld)
             {
                 builder.Append(" 狀態=").Append(capture.State.Value).Append(" 掙脫=").Append(Format(capture.Struggle.Value));
+                if (capture.IsAsleep)
+                {
+                    builder.Append(" 麻醉睡著=").Append(Format(capture.SleepRemaining)).Append("s");
+                }
             }
             else if (capture.State.Value == CaptureState.Caged)
             {

@@ -139,7 +139,7 @@ namespace AnimalEscape.Players
         void OwnerUpdate()
         {
             bool hold = m_ExternalHold
-                || (Application.isFocused && m_HoldAction != null && m_HoldAction.IsPressed());
+                || (InputGate.GameInputAllowed && m_HoldAction != null && m_HoldAction.IsPressed());
             CaptureCage cage = hold ? CageInReach : null;
             double now = Time.unscaledTimeAsDouble;
 

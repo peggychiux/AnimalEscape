@@ -15,6 +15,9 @@ namespace AnimalEscape.Core
         [Min(2)] public int maxPlayers = 5;
         public ushort localPort = 7777;
 
+        [Tooltip("同一個 Wi-Fi 自動找房間用的 UDP 連接埠（主機在這個埠回答「有房間嗎？」）")]
+        public int lanDiscoveryPort = 47777;
+
         [Header("角色（改了尺寸或顏色後，要重建原型場景，外觀才會更新）")]
         public RoleSettings human = new RoleSettings
         {
@@ -154,6 +157,16 @@ namespace AnimalEscape.Core
 
         [Tooltip("人類扛著動物時的速度倍率")]
         [Range(0.1f, 1f)] public float carrySpeedMultiplier = 0.7f;
+
+        [Header("追與抓：麻醉針（2026-11-17 使用者選的做法 A）")]
+        [Tooltip("人類扛起被網住的動物時打麻醉針：睡著時不能掙扎，睡醒就自己跳下來。關掉就回到舊的「扛在肩上連按掙脫」。")]
+        public bool tranquilizeOnPickup = true;
+
+        [Tooltip("麻醉讓動物睡幾秒（人類要在這段時間內扛到籠子；扛著是 3.5 公尺／秒，10 秒約 35 公尺）")]
+        public float tranqSleepSeconds = 10f;
+
+        [Tooltip("睡在地上的動物，被自由的隊友碰到就醒來：兩個身體的邊緣距離在這個數字以內（公尺）")]
+        public float tranqWakeTouchReach = 0.3f;
 
         [Tooltip("動物至少要用這個速度（公尺／秒）撞上扛著隊友的人類，才算推撞。慢走不算。")]
         public float bumpMinSpeed = 3.3f;

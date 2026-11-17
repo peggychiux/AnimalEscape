@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using AnimalEscape.Core;
+using AnimalEscape.Match;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -25,6 +26,38 @@ namespace AnimalEscape.Players
         Left = 3
     }
 
+    /// <summary>選身分被主機拒絕的原因。</summary>
+    public enum RoleDenial : byte
+    {
+        /// <summary>這個身分已經有人選了（每種身分只能有一位）。</summary>
+        Taken = 0,
+
+        /// <summary>測試房間關掉了「大家自己選角色」，只有房主能分配。</summary>
+        HostAssigns = 1,
+
+        /// <summary>比賽中不能換身分。</summary>
+        DuringMatch = 2,
+
+        /// <summary>被網住、被扛著、關在籠子裡時不能換。</summary>
+        Captured = 3
+    }
+
+    /// <summary>測試模式 F1 面板上，玩家可以要主機幫自己做的事（只有測試房間有效）。</summary>
+    public enum DevRequest : byte
+    {
+        /// <summary>打開所有收容區。</summary>
+        OpenAllHabitats = 0,
+
+        /// <summary>把我送進實驗室。</summary>
+        SendMeToLab = 1,
+
+        /// <summary>把我從籠子（或實驗室）放出來。</summary>
+        ReleaseMe = 2,
+
+        /// <summary>把我搬回出生點（狀態也清掉）。</summary>
+        BackToSpawn = 3
+    }
+
     public class PlayerSlot : NetworkBehaviour
     {
         /// <summary>房間裡所有玩家的狀態（每台電腦各自維護）。</summary>
@@ -46,6 +79,13 @@ namespace AnimalEscape.Players
         public Role DeniedRole { get; private set; }
 
         public float DeniedTime { get; private set; } = -100f;
+
+        public RoleDenial DeniedReason { get; private set; }
+
+        /// <summary>F1 面板上一次請主機做事的結果（只在自己電腦上有值）。</summary>
+        public string DevReply { get; private set; } = "";
+
+        public float DevReplyTime { get; private set; } = -100f;
 
         /// <summary>主機在產生這個物件前先填好的座位號碼，產生時會寫進 Seat 同步給所有人。</summary>
         [System.NonSerialized] public int PendingSeat;
@@ -153,9 +193,160 @@ namespace AnimalEscape.Players
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         void RequestRoleRpc(Role role)
         {
-            if (PlayerSpawner.Instance != null)
+            if (PlayerSpawner.Instance == null)
             {
-                PlayerSpawner.Instance.AssignRole(this, role);
+                return;
+            }
+
+            // 測試房間關掉「大家自己選角色」時，只有房主（主機自己）能換身分。
+            if (MatchState.OnlyHostAssignsRoles && !IsHostsOwn)
+            {
+                NotifyRoleDenied(role, RoleDenial.HostAssigns);
+                return;
+            }
+
+            PlayerSpawner.Instance.AssignRole(this, role);
+        }
+
+        /// <summary>這個玩家狀態屬於主機自己（不是電腦玩家）。</summary>
+        public bool IsHostsOwn
+        {
+            get { return !IsBotSlot && OwnerClientId == NetworkManager.ServerClientId; }
+        }
+
+        /// <summary>
+        /// 玩家端呼叫（測試模式 F1 面板）：原地換成這個身分，不回出生點。只有測試房間有效；
+        /// 比賽中要打開「比賽中隨時原地換身分」，身分重複要打開「同一種身分可以重複」。
+        /// </summary>
+        public void RequestRoleInPlace(Role role)
+        {
+            if (IsSpawned && IsOwner && role != Role.None)
+            {
+                RequestRoleInPlaceRpc(role);
+            }
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+        void RequestRoleInPlaceRpc(Role role)
+        {
+            if (PlayerSpawner.Instance == null || !MatchState.IsTestRoom)
+            {
+                return;
+            }
+
+            if (MatchState.OnlyHostAssignsRoles && !IsHostsOwn)
+            {
+                NotifyRoleDenied(role, RoleDenial.HostAssigns);
+                return;
+            }
+
+            PlayerSpawner.Instance.AssignRole(this, role, true, true);
+        }
+
+        /// <summary>玩家端呼叫（測試模式 F1 面板）：請主機幫我做一件事。結果寫在 DevReply。</summary>
+        public void RequestDev(DevRequest request)
+        {
+            if (IsSpawned && IsOwner)
+            {
+                DevRequestRpc(request);
+            }
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+        void DevRequestRpc(DevRequest request)
+        {
+            DevReplyRpc(ServerRunDevRequest(request));
+        }
+
+        [Rpc(SendTo.Owner)]
+        void DevReplyRpc(string reply)
+        {
+            DevReply = reply;
+            DevReplyTime = Time.unscaledTime;
+        }
+
+        /// <summary>主機端：做 F1 面板要求的事，回傳給人看的結果。</summary>
+        string ServerRunDevRequest(DevRequest request)
+        {
+            MatchState match = MatchState.Instance;
+            if (match == null || !match.IsTest)
+            {
+                return "只有測試房間可以用";
+            }
+
+            PlayerAvatar avatar = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.GetAvatar(this) : null;
+            PlayerCapture capture = avatar != null ? avatar.Capture : null;
+            switch (request)
+            {
+                case DevRequest.OpenAllHabitats:
+                    match.ServerOpenAllHabitats();
+                    return "所有收容區都打開了";
+
+                case DevRequest.SendMeToLab:
+                    if (capture == null || !Roles.IsAnimal(avatar.AvatarRole.Value))
+                    {
+                        return "要是動物才能送進實驗室";
+                    }
+
+                    if (capture.IsInLab)
+                    {
+                        return "你已經在實驗室裡了";
+                    }
+
+                    capture.ServerSendToLab();
+                    return "送進實驗室了";
+
+                case DevRequest.ReleaseMe:
+                    if (capture == null)
+                    {
+                        return "你還沒有角色";
+                    }
+
+                    if (capture.State.Value == CaptureState.Caged)
+                    {
+                        CaptureCage cage = CaptureCage.Find(capture.CageNumber.Value);
+                        capture.ServerRescue(cage != null ? cage.transform.position + Vector3.right * 3f : avatar.transform.position);
+                        return "從籠子放出來了";
+                    }
+
+                    if (capture.IsInLab)
+                    {
+                        LabRoom lab = LabRoom.Current;
+                        capture.ServerReleaseFromLab(lab != null ? lab.OutsidePoint : avatar.transform.position);
+
+                        // 測試用的放出來不算「被門禁卡救過」（不然下次被抓會直接回實驗室）。
+                        ReleasedFromLab.Value = false;
+                        return "從實驗室放出來了";
+                    }
+
+                    return "你沒有被關";
+
+                case DevRequest.BackToSpawn:
+                {
+                    if (capture == null)
+                    {
+                        return "你還沒有角色";
+                    }
+
+                    int ordinal = 0;
+                    for (int i = 0; i < All.Count; i++)
+                    {
+                        PlayerSlot other = All[i];
+                        if (other != null && other != this && other.CurrentRole.Value == CurrentRole.Value && other.PlayerNumber < PlayerNumber)
+                        {
+                            ordinal++;
+                        }
+                    }
+
+                    Vector3 position;
+                    Quaternion rotation;
+                    PlayerSpawner.GetSpawnPoint(avatar.AvatarRole.Value, ordinal, out position, out rotation);
+                    capture.ServerResetForMatch(position, rotation);
+                    return "回到出生點了";
+                }
+
+                default:
+                    return "";
             }
         }
 
@@ -180,19 +371,37 @@ namespace AnimalEscape.Players
         /// <summary>
         /// 主機端呼叫：通知這位玩家，他選的身分不能用（例如人類已經有人選了）。
         /// </summary>
-        public void NotifyRoleDenied(Role role)
+        public void NotifyRoleDenied(Role role, RoleDenial reason = RoleDenial.Taken)
         {
-            if (IsSpawned && IsServer)
+            if (IsSpawned && IsServer && !IsBotSlot)
             {
-                RoleDeniedRpc(role);
+                RoleDeniedRpc(role, reason);
             }
         }
 
         [Rpc(SendTo.Owner)]
-        void RoleDeniedRpc(Role role)
+        void RoleDeniedRpc(Role role, RoleDenial reason)
         {
             DeniedRole = role;
+            DeniedReason = reason;
             DeniedTime = Time.unscaledTime;
+        }
+
+        /// <summary>給人看的「為什麼不能選」。</summary>
+        public static string DescribeDenial(Role role, RoleDenial reason)
+        {
+            string name = role != Role.None ? GameConfig.Instance.GetRole(role).displayName : "身分";
+            switch (reason)
+            {
+                case RoleDenial.HostAssigns:
+                    return "這個房間只有房主能分配身分。";
+                case RoleDenial.DuringMatch:
+                    return "比賽中不能換身分。";
+                case RoleDenial.Captured:
+                    return "被抓住的時候不能換身分。";
+                default:
+                    return name + "已經有人選了，請選別的身分。";
+            }
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

@@ -243,7 +243,7 @@ namespace AnimalEscape.Players
 
         void OwnerUpdate()
         {
-            bool focused = Application.isFocused && m_HoldAction != null;
+            bool focused = InputGate.GameInputAllowed && m_HoldAction != null;
             bool hold = m_ExternalHold || (focused && m_HoldAction.IsPressed());
             bool tapped = m_ExternalTap || (focused && m_HoldAction.WasPressedThisFrame());
             m_ExternalTap = false;

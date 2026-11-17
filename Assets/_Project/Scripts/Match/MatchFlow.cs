@@ -74,8 +74,14 @@ namespace AnimalEscape.Match
         /// <summary>這一局開始時有幾隻動物。</summary>
         public readonly NetworkVariable<int> AnimalCount = new NetworkVariable<int>(0);
 
+        /// <summary>一局幾秒（主機開房時決定：正式模式可選 5／8／10 分鐘；測試模式的 F1 面板可以改）。要比 StartedAt 早。</summary>
+        public readonly NetworkVariable<float> MatchSeconds = new NetworkVariable<float>(600f);
+
         /// <summary>這一局開始的時刻（主機時間）。</summary>
         public readonly NetworkVariable<double> StartedAt = new NetworkVariable<double>(-100.0);
+
+        /// <summary>計時暫停時停在剩幾秒（測試模式的 F1 面板）；沒有暫停是 -1。要比 StartedAt 晚（繼續時先改 StartedAt）。</summary>
+        public readonly NetworkVariable<float> PausedLeft = new NetworkVariable<float>(-1f);
 
         public readonly NetworkVariable<MatchPhase> Phase = new NetworkVariable<MatchPhase>(MatchPhase.Lobby);
 
@@ -128,7 +134,21 @@ namespace AnimalEscape.Match
         /// <summary>這一局還剩幾秒（比賽中才有意義）。</summary>
         public float TimeLeft
         {
-            get { return Mathf.Max(0f, (float)(StartedAt.Value + GameConfig.Instance.matchSeconds - PlayerCapture.Now)); }
+            get
+            {
+                if (PausedLeft.Value >= 0f)
+                {
+                    return PausedLeft.Value;
+                }
+
+                return Mathf.Max(0f, (float)(StartedAt.Value + MatchSeconds.Value - PlayerCapture.Now));
+            }
+        }
+
+        /// <summary>計時暫停中（測試模式）。</summary>
+        public bool TimerPaused
+        {
+            get { return PausedLeft.Value >= 0f; }
         }
 
         /// <summary>貨車還有幾秒開走（門還沒開就是 0）。</summary>
@@ -171,6 +191,11 @@ namespace AnimalEscape.Match
         public override void OnNetworkSpawn()
         {
             Instance = this;
+            if (IsServer)
+            {
+                // 主選單選的比賽時間（沒選就用 GameConfig 的預設）。
+                MatchSeconds.Value = RoomOptions.MatchSeconds > 0f ? RoomOptions.MatchSeconds : GameConfig.Instance.matchSeconds;
+            }
         }
 
         public override void OnNetworkDespawn()
@@ -190,7 +215,7 @@ namespace AnimalEscape.Match
             }
 
             string reason;
-            ServerStartMatch(out reason);
+            ServerStartMatch(out reason, !MatchState.SkipsTeamRequirement);
             LastStartError = reason;
         }
 
@@ -206,6 +231,12 @@ namespace AnimalEscape.Match
         /// 所有人回到出生點、收容區全部鎖上、混亂值歸零、壞掉的東西恢復、實驗室的球和門禁卡重放。
         /// </summary>
         public bool ServerStartMatch(out string reason)
+        {
+            return ServerStartMatch(out reason, !MatchState.SkipsTeamRequirement);
+        }
+
+        /// <summary>同上；requireTeams = false 時不用湊齊人類和動物（測試模式的規則開關）。</summary>
+        public bool ServerStartMatch(out string reason, bool requireTeams)
         {
             reason = "";
             if (!IsServer)
@@ -223,7 +254,7 @@ namespace AnimalEscape.Match
             int humans;
             int animals;
             CountRoles(out humans, out animals);
-            if (humans < 1 || animals < 1)
+            if (requireTeams && (humans < 1 || animals < 1))
             {
                 reason = "至少要有 1 個人類和 1 隻動物";
                 return false;
@@ -259,6 +290,7 @@ namespace AnimalEscape.Match
             }
 
             StartedAt.Value = PlayerCapture.Now;
+            PausedLeft.Value = -1f;
             Phase.Value = MatchPhase.Playing;
             return true;
         }
@@ -274,6 +306,7 @@ namespace AnimalEscape.Match
             ServerResetState();
             Outcome.Value = MatchOutcome.None;
             EndReason.Value = MatchEndReason.None;
+            PausedLeft.Value = -1f;
             Phase.Value = MatchPhase.Lobby;
         }
 
@@ -425,9 +458,57 @@ namespace AnimalEscape.Match
         /// <summary>主機端：把這一局剩下的時間改成 seconds 秒（測試工具用）。</summary>
         public void ServerSetTimeLeft(float seconds)
         {
-            if (IsServer && IsPlaying)
+            if (!IsServer || !IsPlaying)
             {
-                StartedAt.Value = PlayerCapture.Now + seconds - GameConfig.Instance.matchSeconds;
+                return;
+            }
+
+            seconds = Mathf.Max(0f, seconds);
+            if (TimerPaused)
+            {
+                PausedLeft.Value = seconds;
+            }
+            else
+            {
+                StartedAt.Value = PlayerCapture.Now + seconds - MatchSeconds.Value;
+            }
+        }
+
+        /// <summary>主機端：一局改成幾秒（還沒開始時用；比賽中請用 ServerSetTimeLeft）。</summary>
+        public void ServerSetMatchSeconds(float seconds)
+        {
+            if (IsServer)
+            {
+                MatchSeconds.Value = Mathf.Clamp(seconds, 5f, 3600f);
+            }
+        }
+
+        /// <summary>主機端：暫停／繼續計時（測試模式的 F1 面板）。</summary>
+        public void ServerSetPaused(bool paused)
+        {
+            if (!IsServer || !IsPlaying || paused == TimerPaused)
+            {
+                return;
+            }
+
+            if (paused)
+            {
+                PausedLeft.Value = TimeLeft;
+            }
+            else
+            {
+                // 先改開始時間再取消暫停（宣告順序：StartedAt 比 PausedLeft 早），中間不會跳一下。
+                StartedAt.Value = PlayerCapture.Now + PausedLeft.Value - MatchSeconds.Value;
+                PausedLeft.Value = -1f;
+            }
+        }
+
+        /// <summary>主機端：壞掉的東西全部恢復（混亂值不變；測試模式的 F1 面板）。</summary>
+        public void ServerRestoreBreakables()
+        {
+            if (IsServer)
+            {
+                BrokenMask.Value = 0UL;
             }
         }
 
@@ -559,7 +640,7 @@ namespace AnimalEscape.Match
         void ServerCheckEnd()
         {
             double now = PlayerCapture.Now;
-            if (TimeLeft <= 0f)
+            if (TimeLeft <= 0f && !TimerPaused)
             {
                 ServerEndMatch(MatchEndReason.TimeUp);
                 return;
@@ -603,7 +684,11 @@ namespace AnimalEscape.Match
 
             if (animals == 0)
             {
-                ServerEndMatch(MatchEndReason.NoAnimals);
+                // 測試模式（不用湊齊人類和動物）：場上沒有動物也照樣跑，只靠時間和貨車結束。
+                if (!MatchState.SkipsTeamRequirement)
+                {
+                    ServerEndMatch(MatchEndReason.NoAnimals);
+                }
             }
             else if (inPlay == 0)
             {

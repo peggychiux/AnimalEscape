@@ -152,7 +152,7 @@ namespace AnimalEscape.Players
 
             // 視窗不在最前面時不讀取輸入：同一台電腦開多個視窗測試時，只有正在操作的那個視窗的角色會動。
             // 電腦玩家不讀鍵盤（它只用 SetExternalInput）。
-            bool focused = Application.isFocused && !m_Avatar.IsBot;
+            bool focused = InputGate.GameInputAllowed && !m_Avatar.IsBot;
 
             // 以鏡頭方向為準的移動方向：WASD（手把左搖桿）往各方向走，A／D 是橫著走。
             // 方向鍵：↑↓ 前後走；←→ 預設是轉鏡頭（GameConfig.arrowKeyTurning，照《黎明死線》），關掉就和 A／D 一樣橫著走。
@@ -187,7 +187,7 @@ namespace AnimalEscape.Players
             input = Vector2.ClampMagnitude(input, 1f);
             if (playerCamera != null && turn != 0f)
             {
-                playerCamera.AddYaw(turn * config.keyboardTurnSpeed * deltaTime);
+                playerCamera.AddYaw(turn * UserSettings.TurnSpeed * deltaTime);
             }
 
             Vector3 forward = Vector3.forward;

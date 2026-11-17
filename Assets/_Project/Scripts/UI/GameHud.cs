@@ -23,14 +23,26 @@ namespace AnimalEscape.UI
         static readonly Color k_BarRescue = new Color(0.45f, 0.90f, 0.55f);
         static readonly Color k_BarCage = new Color(0.95f, 0.45f, 0.40f);
         static readonly Color k_BarKeycard = new Color(0.40f, 0.90f, 0.95f);
+        static readonly Color k_BarSleep = new Color(0.62f, 0.55f, 0.98f);
         const float k_LabBannerSeconds = 4f;
 
         const float k_EmptyCageLabelDistance = 22f;
+
+        void Update()
+        {
+            DevPanel.HandleHotkey();
+        }
 
         void OnGUI()
         {
             var connection = ConnectionManager.Instance;
             if (connection == null || connection.State != ConnectionState.Connected)
+            {
+                return;
+            }
+
+            // 測試房間的設定畫面開著時，整個畫面是主選單（LobbyUI）在畫。
+            if (MatchState.TestSetupOpen)
             {
                 return;
             }
@@ -46,7 +58,8 @@ namespace AnimalEscape.UI
             bool leftMatch = choosing && local.LeftMatch.Value;
 
             // 比賽中沒有身分（比賽開始時還沒選、或中途離開了）：只能看，等這一局結束。
-            bool waiting = choosing && !leftMatch && playing;
+            // 測試房間打開「比賽中隨時換身分」時例外：照樣顯示選身分。
+            bool waiting = choosing && !leftMatch && playing && !MatchState.AllowsSwapDuringMatch;
             bool watching = leftMatch || waiting;
 
             if (!choosing || watching)
@@ -82,8 +95,9 @@ namespace AnimalEscape.UI
 
             Rect matchArea = DrawMatchBar(flow, width, choosing);
             Rect info = DrawInfoPanel(connection, local, choosing);
+            Rect devPanel = DevPanel.Draw(width, height);
             Vector2 mouse = Event.current.mousePosition;
-            bool pointerOverUi = info.Contains(mouse) || interactive.Contains(mouse) || matchArea.Contains(mouse);
+            bool pointerOverUi = info.Contains(mouse) || interactive.Contains(mouse) || matchArea.Contains(mouse) || devPanel.Contains(mouse);
 
             if (leftMatch)
             {
@@ -94,10 +108,15 @@ namespace AnimalEscape.UI
             {
                 DrawWaitPanel(width, height);
             }
-            else if (choosing)
+            else if (choosing && !DevPanel.Open)
             {
                 DrawRolePicker(local, width, height);
                 pointerOverUi = true;
+            }
+
+            if (!DevPanel.Open && Event.current.type == EventType.Repaint)
+            {
+                InputGate.Typing = false;
             }
 
             InputGate.PointerOverUi = pointerOverUi;
@@ -232,6 +251,12 @@ namespace AnimalEscape.UI
             }
 
             reason = humans < 1 ? "還沒有人選人類" : (animals < 1 ? "還沒有人選動物" : "");
+            if (MatchState.SkipsTeamRequirement)
+            {
+                reason = "";
+                return true;
+            }
+
             return humans >= 1 && animals >= 1;
         }
 
@@ -381,7 +406,25 @@ namespace AnimalEscape.UI
             }
 
             y += 10f;
-            if (isHost)
+            if (isHost && MatchState.IsTestRoom)
+            {
+                // 測試房間：照「從哪裡開始」再來一局，或回到測試房間改設定。
+                MatchState match = MatchState.Instance;
+                if (GUI.Button(new Rect(panel.x + panel.width * 0.5f - 226f, y, 220f, 34f), "再來一局", UiKit.Button))
+                {
+                    string ignored;
+                    match.ServerBeginTest(out ignored);
+                }
+
+                if (GUI.Button(new Rect(panel.x + panel.width * 0.5f + 6f, y, 220f, 34f), "回到測試房間", UiKit.Button))
+                {
+                    match.ServerReturnToTestSetup();
+                }
+
+                GUI.Label(new Rect(panel.x, y + 38f, panel.width, 22f),
+                    "再來一局從「" + RoomOptions.StartPhaseName(match.StartPhase.Value) + "」開始", UiKit.Hint);
+            }
+            else if (isHost)
             {
                 string reason;
                 bool canStart = CanStartMatch(out reason);
@@ -587,8 +630,19 @@ namespace AnimalEscape.UI
             PlayerCapture carried = mine.Carried;
             if (carried != null)
             {
-                GUI.Label(line1, "扛著 " + NameOf(carried) + "（走得比較慢，不能揮網）", UiKit.Center);
                 CaptureCage cage = mine.CageInReach;
+                if (carried.IsAsleep)
+                {
+                    // 麻醉針：下面的條是牠還要睡多久（睡醒就會跳下來跑掉）。
+                    GUI.Label(line1, "扛著 " + NameOf(carried) + "｜麻醉中，還要睡 " + carried.SleepRemaining.ToString("0.0") + " 秒", UiKit.Center);
+                    GUI.Label(line2, cage != null
+                        ? "按 E 關進 " + cage.number + " 號籠！"
+                        : "趁牠還在睡，走到空籠子旁按 E 關進去（不在籠子旁按 E 是放下）", UiKit.Tag);
+                    UiKit.Bar(bar, carried.SleepRemaining / Mathf.Max(0.1f, GameConfig.Instance.tranqSleepSeconds), k_BarSleep);
+                    return;
+                }
+
+                GUI.Label(line1, "扛著 " + NameOf(carried) + "（走得比較慢，不能揮網）", UiKit.Center);
                 GUI.Label(line2, cage != null
                     ? "按 E 關進 " + cage.number + " 號籠！｜下面是牠的掙脫進度"
                     : "走到空籠子旁按 E 關進去（不在籠子旁按 E 是放下）", UiKit.Tag);
@@ -599,7 +653,8 @@ namespace AnimalEscape.UI
             float cooldown = mine.NetCooldownRemaining;
             if (mine.IsStaggered)
             {
-                GUI.Label(line1, "被撞到了！踉蹌中 " + mine.StaggerRemaining.ToString("0.0") + " 秒", UiKit.Center);
+                // 踉蹌只會在動物跑掉時發生：肩上掙脫、麻醉醒來跳下去、被隊友撞。
+                GUI.Label(line1, "動物跑掉了！踉蹌中 " + mine.StaggerRemaining.ToString("0.0") + " 秒", UiKit.Center);
             }
             else if (cooldown > 0f)
             {
@@ -618,7 +673,10 @@ namespace AnimalEscape.UI
             PlayerCapture target = mine.FindPickupTarget();
             if (target != null && !mine.IsStaggered)
             {
-                GUI.Label(line2, "按 E 扛起 " + NameOf(target), UiKit.Tag);
+                string action = target.IsAsleep
+                    ? "按 E 扛起 " + NameOf(target) + "（還在睡 " + target.SleepRemaining.ToString("0") + " 秒）"
+                    : (GameConfig.Instance.tranquilizeOnPickup ? "按 E 打麻醉針、扛起 " + NameOf(target) : "按 E 扛起 " + NameOf(target));
+                GUI.Label(line2, action, UiKit.Tag);
             }
             else if (Time.unscaledTime - mine.LastSwingOutcomeTime < k_SwingMessageSeconds)
             {
@@ -731,17 +789,37 @@ namespace AnimalEscape.UI
 
             if (state != CaptureState.Free)
             {
-                var panel = new Rect((width - 460f) * 0.5f, height - 170f, 460f, 118f);
+                var panel = new Rect((width - 500f) * 0.5f, height - 170f, 500f, 118f);
                 UiKit.Panel(panel);
+
+                if (mine.IsAsleep)
+                {
+                    // 麻醉針：睡著不能掙扎，只能等醒來或等隊友。
+                    string sleepTitle = state == CaptureState.Carried
+                        ? "被 " + NameOf(mine.Carrier) + " 麻醉扛走了…"
+                        : "你被麻醉了，睡在地上…";
+                    GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 34f), sleepTitle, UiKit.Title);
+                    GUI.Label(new Rect(panel.x, panel.y + 44f, panel.width, 26f), state == CaptureState.Carried
+                        ? "睡著不能掙扎｜醒來就會跳下來｜隊友全速撞人類可以把你撞下來"
+                        : "睡著不能掙扎｜醒來就能跑｜隊友碰你一下就會醒", UiKit.Center);
+                    var sleepBar = new Rect(panel.x + 20f, panel.y + 80f, panel.width - 40f, 22f);
+                    UiKit.Bar(sleepBar, mine.SleepRemaining / Mathf.Max(0.1f, GameConfig.Instance.tranqSleepSeconds), k_BarSleep);
+                    GUI.Label(sleepBar, "還要睡 " + mine.SleepRemaining.ToString("0.0") + " 秒", UiKit.Tag);
+                    return;
+                }
 
                 string title = state == CaptureState.Carried
                     ? "被 " + NameOf(mine.Carrier) + " 扛走了！"
                     : "被網住了！";
                 GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 34f), title, UiKit.Title);
-                GUI.Label(new Rect(panel.x, panel.y + 44f, panel.width, 26f), "連按 空白鍵 掙脫", UiKit.Center);
+                GUI.Label(new Rect(panel.x, panel.y + 44f, panel.width, 26f),
+                    state == CaptureState.Netted && GameConfig.Instance.tranquilizeOnPickup
+                        ? "連按 空白鍵 掙脫｜人類走過來扛你時會打麻醉針" : "連按 空白鍵 掙脫", UiKit.Center);
                 UiKit.Bar(new Rect(panel.x + 20f, panel.y + 80f, panel.width - 40f, 22f), mine.Struggle.Value, k_BarStruggle);
                 return;
             }
+
+            DrawSleepingTeammateHint(mine, width, height);
 
             // 救援：正在救就顯示進度條；站在關著隊友的籠子旁就提示可以救。（比撬鎖優先）
             PlayerRescue rescue = PlayerRescue.Local;
@@ -917,6 +995,42 @@ namespace AnimalEscape.UI
         }
 
         /// <summary>這隻動物是不是還關在自己的收容區裡（門還沒被撬開）。</summary>
+        /// <summary>
+        /// （自由的動物）8 公尺內有被麻醉、睡在地上的隊友：提示走過去碰一下就能叫醒（主機用距離判斷，碰到就醒）。
+        /// 畫在其他提示的上面，不會擋住救人、撬鎖這些提示。隊友之間的狀態本來就互相知道，所以不做遮蔽判斷。
+        /// </summary>
+        static void DrawSleepingTeammateHint(PlayerCapture mine, float width, float height)
+        {
+            PlayerCapture nearest = null;
+            float nearestDistance = 8f;
+            for (int i = 0; i < PlayerAvatar.All.Count; i++)
+            {
+                PlayerAvatar avatar = PlayerAvatar.All[i];
+                PlayerCapture other = avatar != null && avatar.IsSpawned ? avatar.Capture : null;
+                if (other == null || other == mine || other.State.Value != CaptureState.Netted || !other.IsAsleep)
+                {
+                    continue;
+                }
+
+                float distance = Vector3.Distance(avatar.transform.position, mine.transform.position);
+                if (distance < nearestDistance)
+                {
+                    nearest = other;
+                    nearestDistance = distance;
+                }
+            }
+
+            if (nearest == null)
+            {
+                return;
+            }
+
+            var panel = new Rect((width - 460f) * 0.5f, height - 236f, 460f, 40f);
+            UiKit.Panel(panel);
+            GUI.Label(panel, NameOf(nearest) + " 被麻醉睡著了：走過去碰牠一下就會醒（還要睡 "
+                + Mathf.CeilToInt(nearest.SleepRemaining) + " 秒）", UiKit.Center);
+        }
+
         static bool IsLockedInHabitat(PlayerCapture mine)
         {
             if (mine.Avatar == null)
@@ -966,15 +1080,30 @@ namespace AnimalEscape.UI
             bool canManageBots = isHost && !playing && PlayerSpawner.Instance != null;
             int botCount = PlayerSpawner.BotCount;
             bool showBotMessage = Time.unscaledTime - s_BotMessageTime < 4f && !string.IsNullOrEmpty(s_BotMessage);
+            bool testRoom = MatchState.IsTestRoom;
+            bool hasAddress = !connection.IsOnlineRoom && isHost && !string.IsNullOrEmpty(connection.LocalAddress);
             float panelHeight = 168f + helpLines * 22f + playerCount * 22f + (hasCode ? 34f : 0f) + (choosing ? 0f : 116f) + (isAnimal ? 88f : 0f)
-                + (hasMap ? 24f : 0f) + (canChangeMap ? 36f : 0f) + (canManageBots ? 36f : 0f) + (showBotMessage ? 22f : 0f);
+                + (hasMap ? 24f : 0f) + (canChangeMap ? 36f : 0f) + (canManageBots ? 36f : 0f) + (showBotMessage ? 22f : 0f)
+                + (testRoom ? 22f : 0f) + (hasAddress ? 22f : 0f);
             var panel = new Rect(12f, 12f, 300f, panelHeight);
 
             UiKit.Panel(panel);
             GUILayout.BeginArea(new Rect(panel.x + 14f, panel.y + 10f, panel.width - 28f, panel.height - 20f));
 
-            string roomType = connection.IsOnlineRoom ? "線上房間" : "本機房間";
-            GUILayout.Label(roomType + "｜" + (isHost ? "你是主機" : "你是玩家"), UiKit.Header);
+            // 用主機開房時的連法（連進來的人自己是怎麼連的不重要）。
+            LinkMode link = match != null && match.IsSpawned ? match.RoomLink.Value : connection.Link;
+            string roomType = link == LinkMode.Online ? "線上房間" : (link == LinkMode.ThisComputer ? "本機房間" : "Wi-Fi 房間");
+            GUILayout.Label((testRoom ? "測試｜" : "") + roomType + "｜" + (isHost ? "你是主機" : "你是玩家"), UiKit.Header);
+            if (testRoom)
+            {
+                GUILayout.Label("按 F1 打開開發者面板", UiKit.Warning);
+            }
+
+            if (hasAddress)
+            {
+                GUILayout.Label("這台電腦的 IP：" + connection.LocalAddress, UiKit.Hint);
+            }
+
             if (hasMap)
             {
                 GUILayout.Label("地圖：" + registry.Active.displayName, UiKit.Text);
@@ -1046,8 +1175,11 @@ namespace AnimalEscape.UI
                 PlayerCapture mine = PlayerCapture.Local;
                 CaptureState state = mine != null ? mine.State.Value : CaptureState.Free;
                 bool captured = state != CaptureState.Free && state != CaptureState.InLab && state != CaptureState.Escaped;
-                GUI.enabled = !captured && !playing;
-                string caption = playing ? "換身分（比賽中不能換）" : (captured ? "換身分（被抓住時不能換）" : "換身分");
+                bool lockedByMatch = playing && !MatchState.AllowsSwapDuringMatch;
+                bool hostAssigns = MatchState.OnlyHostAssignsRoles && !isHost;
+                GUI.enabled = !captured && !lockedByMatch && !hostAssigns;
+                string caption = hostAssigns ? "換身分（房主分配）"
+                    : (lockedByMatch ? "換身分（比賽中不能換）" : (captured ? "換身分（被抓住時不能換）" : "換身分"));
                 if (GUILayout.Button(caption, UiKit.Button, GUILayout.Height(30f)))
                 {
                     local.RequestRole(Role.None);
@@ -1092,7 +1224,7 @@ namespace AnimalEscape.UI
                 }
             }
 
-            if (GUILayout.Button("離開房間", UiKit.Button, GUILayout.Height(30f)))
+            if (GUILayout.Button(isHost ? "關掉房間，回主選單" : "離開房間，回主選單", UiKit.Button, GUILayout.Height(30f)))
             {
                 connection.Leave();
             }
@@ -1117,10 +1249,18 @@ namespace AnimalEscape.UI
             GUILayout.Label("選擇身分", UiKit.Title);
             GUILayout.Space(4f);
 
-            if (Time.unscaledTime - local.DeniedTime < k_DeniedMessageSeconds && local.DeniedRole != Role.None)
+            bool hostAssigns = MatchState.OnlyHostAssignsRoles && !IsHost();
+            if (Time.unscaledTime - local.DeniedTime < k_DeniedMessageSeconds)
             {
-                string deniedName = GameConfig.Instance.GetRole(local.DeniedRole).displayName;
-                GUILayout.Label(deniedName + "已經有人選了，請選別的身分。", UiKit.Warning);
+                GUILayout.Label(PlayerSlot.DescribeDenial(local.DeniedRole, local.DeniedReason), UiKit.Warning);
+            }
+            else if (hostAssigns)
+            {
+                GUILayout.Label("這個測試房間由房主分配身分，請等房主幫你選。", UiKit.Warning);
+            }
+            else if (MatchState.AllowsDuplicateRoles)
+            {
+                GUILayout.Label("測試房間：同一種身分可以重複。人類從研究室出發；動物開場關在自己的收容區。", UiKit.Hint);
             }
             else
             {
@@ -1133,13 +1273,13 @@ namespace AnimalEscape.UI
             {
                 Role role = Roles.Selectable[i];
                 RoleSettings settings = GameConfig.Instance.GetRole(role);
-                bool unavailable = IsRoleTakenByOther(local, role);
+                bool unavailable = hostAssigns || (!MatchState.AllowsDuplicateRoles && IsRoleTakenByOther(local, role));
 
                 string label = settings.displayName
                                + "　身高 " + settings.height.ToString("0.0") + " m"
                                + "｜速度 " + settings.moveSpeed.ToString("0.0")
                                + "｜跳 " + settings.jumpHeight.ToString("0.0") + " m"
-                               + (unavailable ? "（已有人選）" : "");
+                               + (unavailable && !hostAssigns ? "（已有人選）" : "");
 
                 GUI.enabled = !unavailable;
                 if (GUILayout.Button(label, UiKit.Button, GUILayout.Height(40f)))
@@ -1674,7 +1814,11 @@ namespace AnimalEscape.UI
                 if (capture != null)
                 {
                     string note = null;
-                    if (capture.State.Value == CaptureState.Netted)
+                    if (capture.IsAsleep)
+                    {
+                        note = "睡著 " + Mathf.CeilToInt(capture.SleepRemaining);
+                    }
+                    else if (capture.State.Value == CaptureState.Netted)
                     {
                         note = "被網住";
                     }

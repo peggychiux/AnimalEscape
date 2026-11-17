@@ -61,6 +61,8 @@ MonoBehaviour:
   animalViewMode: 1
   mouseSensitivity: 0.12
   gamepadLookSpeed: 150
+  arrowKeyTurning: 1
+  keyboardTurnSpeed: 160
   firstPersonFieldOfView: 70
   firstPersonMinPitch: -80
   firstPersonMaxPitch: 80
@@ -132,6 +134,8 @@ MonoBehaviour:
   breakSecondsMedium: 1.5
   breakSecondsLarge: 3
   breakRange: 1.2
+  breakMarkerRange: 18
+  breakMarkersForHuman: 0
   consoleSeconds: 5
   consoleChaosReduction: 15
   consoleCooldown: 60
@@ -139,6 +143,18 @@ MonoBehaviour:
   exitOpenSeconds: 10
   exitHelperBonus: 0.5
   exitReach: 2.6
+  botSightDistance: 10
+  botNoticeDistance: 4
+  botSafeDistance: 15
+  botFleeMemorySeconds: 3
+  botStrugglePerSecond: 7
+  botThinkInterval: 0.25
+  botRestMin: 6
+  botRestMax: 14
+  botsActInLobby: 0
+  botGiveUpSeconds: 25
+  botAgentRadius: 0.3
+  botAgentHeight: 1
   humanFootstepRangeRun: 20
   humanFootstepRangeSneak: 8
   bellRangeRun: 18

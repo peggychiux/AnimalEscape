@@ -174,7 +174,7 @@ namespace AnimalEscape.Players
                 return;
             }
 
-            if (Application.isFocused && m_EmoteActions != null)
+            if (InputGate.GameInputAllowed && m_EmoteActions != null)
             {
                 for (int i = 0; i < m_EmoteActions.Length; i++)
                 {

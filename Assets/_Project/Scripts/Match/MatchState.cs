@@ -43,6 +43,21 @@ namespace AnimalEscape.Match
         /// <summary>目前用哪一張地圖（MapRegistry.maps 的編號），由主機決定。</summary>
         public readonly NetworkVariable<int> MapIndex = new NetworkVariable<int>(0);
 
+        /// <summary>這是正式房間還是測試房間（主機開房時決定，之後不變）。</summary>
+        public readonly NetworkVariable<RoomMode> Mode = new NetworkVariable<RoomMode>(RoomMode.Official);
+
+        /// <summary>主機開房用的連法（只用這台電腦／同一個 Wi-Fi／線上）。連進來的人用這個顯示「這是什麼房間」，不是自己怎麼連的。</summary>
+        public readonly NetworkVariable<LinkMode> RoomLink = new NetworkVariable<LinkMode>(LinkMode.Lan);
+
+        /// <summary>測試模式的規則開關（TestRule 的位元）；正式房間一律是 0。</summary>
+        public readonly NetworkVariable<int> TestRules = new NetworkVariable<int>(0);
+
+        /// <summary>測試模式要從哪個階段開始（房主在測試房間選，大家都看得到）。</summary>
+        public readonly NetworkVariable<TestStart> StartPhase = new NetworkVariable<TestStart>(TestStart.MatchStart);
+
+        /// <summary>測試房間的設定畫面開著（還沒按「開始測試」，或按了 F1 面板的「回到測試房間」）。</summary>
+        public readonly NetworkVariable<bool> InTestSetup = new NetworkVariable<bool>(false);
+
         /// <summary>
         /// 哪幾個收容區的門已經開了：第 n 個位元對應 Role 的數值（例如兔子是 2）。
         /// 動物每次出生（選身分）時，牠的收容區會重新鎖上；換地圖時全部重新鎖上。
@@ -71,6 +86,194 @@ namespace AnimalEscape.Match
         bool m_ResetLabPending;
         Vector3 m_LastHolderPosition;
         double m_PickupAllowedAt;
+
+        // ------------------------------------------------------------------
+        // 房間種類與測試模式的規則（每台電腦都可以問）
+        // ------------------------------------------------------------------
+
+        public bool IsTest
+        {
+            get { return Mode.Value == RoomMode.Test; }
+        }
+
+        /// <summary>這個測試規則有沒有打開（正式房間一律 false）。</summary>
+        public bool HasRule(TestRule rule)
+        {
+            return IsTest && (TestRules.Value & (int)rule) != 0;
+        }
+
+        static bool CurrentHasRule(TestRule rule)
+        {
+            MatchState match = Instance;
+            return match != null && match.IsSpawned && match.HasRule(rule);
+        }
+
+        /// <summary>現在的房間是測試房間。</summary>
+        public static bool IsTestRoom
+        {
+            get { return Instance != null && Instance.IsSpawned && Instance.IsTest; }
+        }
+
+        /// <summary>同一種身分可以重複（測試模式的規則）。</summary>
+        public static bool AllowsDuplicateRoles
+        {
+            get { return CurrentHasRule(TestRule.DuplicateRoles); }
+        }
+
+        /// <summary>比賽中可以換身分（測試模式的規則）。</summary>
+        public static bool AllowsSwapDuringMatch
+        {
+            get { return CurrentHasRule(TestRule.SwapAnytime); }
+        }
+
+        /// <summary>不用湊齊人類和動物也能開始（測試模式的規則）。</summary>
+        public static bool SkipsTeamRequirement
+        {
+            get { return CurrentHasRule(TestRule.NoTeamNeeded); }
+        }
+
+        /// <summary>只有房主能分配身分（測試模式把「大家自己選角色」關掉時）。</summary>
+        public static bool OnlyHostAssignsRoles
+        {
+            get { return IsTestRoom && !Instance.HasRule(TestRule.SelfPick); }
+        }
+
+        /// <summary>測試房間的設定畫面現在開著。</summary>
+        public static bool TestSetupOpen
+        {
+            get { return IsTestRoom && Instance.InTestSetup.Value; }
+        }
+
+        /// <summary>主機端：打開或關掉一個測試規則（只有測試房間有效）。</summary>
+        public void ServerSetRule(TestRule rule, bool on)
+        {
+            if (!IsServer || !IsTest)
+            {
+                return;
+            }
+
+            int value = on ? (TestRules.Value | (int)rule) : (TestRules.Value & ~(int)rule);
+            TestRules.Value = value;
+            RoomOptions.Rules = (TestRule)value;
+        }
+
+        /// <summary>主機端：測試要從哪個階段開始。</summary>
+        public void ServerSetStartPhase(TestStart phase)
+        {
+            if (IsServer && IsTest)
+            {
+                StartPhase.Value = phase;
+                RoomOptions.StartPhase = phase;
+            }
+        }
+
+        /// <summary>
+        /// 主機端：「開始測試」（測試房間的大按鈕、F1 面板的「重新開始這一局」、結算的「再來一局」都走這裡）。
+        /// 準備中：只是關掉設定畫面（自由練習）；其他階段：開始比賽（不用湊齊隊伍時照樣能開始），再把狀態推到那個階段。
+        /// </summary>
+        public bool ServerBeginTest(out string reason)
+        {
+            reason = "";
+            if (!IsServer || !IsTest)
+            {
+                reason = "不是測試房間的主機";
+                return false;
+            }
+
+            MatchFlow flow = GetComponent<MatchFlow>();
+            TestStart phase = StartPhase.Value;
+            if (phase == TestStart.Lobby)
+            {
+                if (flow != null && flow.Phase.Value != MatchPhase.Lobby)
+                {
+                    flow.ServerResetToLobby();
+                }
+
+                if (PlayerSpawner.Instance != null)
+                {
+                    PlayerSpawner.Instance.RespawnAllForMatch();
+                }
+
+                ServerLockAllHabitats();
+                InTestSetup.Value = false;
+                return true;
+            }
+
+            if (flow == null)
+            {
+                reason = "找不到比賽流程";
+                return false;
+            }
+
+            if (flow.IsPlaying)
+            {
+                flow.ServerResetToLobby();
+            }
+
+            if (!flow.ServerStartMatch(out reason, !HasRule(TestRule.NoTeamNeeded)))
+            {
+                return false;
+            }
+
+            if (phase >= TestStart.Escaped)
+            {
+                ServerOpenAllHabitats();
+            }
+
+            if (phase >= TestStart.ChaosFull)
+            {
+                flow.ServerSetChaos(100f);
+            }
+
+            if (phase >= TestStart.ExitOpen)
+            {
+                flow.ServerOpenExit();
+            }
+
+            InTestSetup.Value = false;
+            return true;
+        }
+
+        /// <summary>主機端：回到測試房間的設定畫面（比賽回到準備中，所有人回出生點，身分保留）。</summary>
+        public void ServerReturnToTestSetup()
+        {
+            if (!IsServer || !IsTest)
+            {
+                return;
+            }
+
+            MatchFlow flow = GetComponent<MatchFlow>();
+            if (flow != null)
+            {
+                flow.ServerResetToLobby();
+            }
+
+            if (PlayerSpawner.Instance != null)
+            {
+                PlayerSpawner.Instance.RespawnAllForMatch();
+            }
+
+            ServerLockAllHabitats();
+            ServerResetLab(-1);
+            InTestSetup.Value = true;
+        }
+
+        /// <summary>主機端：所有動物的收容區都打開。</summary>
+        public void ServerOpenAllHabitats()
+        {
+            if (!IsServer)
+            {
+                return;
+            }
+
+            for (int i = 0; i < Roles.Selectable.Length; i++)
+            {
+                if (Roles.IsAnimal(Roles.Selectable[i]))
+                {
+                    ServerSetHabitatOpen(Roles.Selectable[i], true);
+                }
+            }
+        }
 
         /// <summary>這種動物的收容區，門是不是已經開了。</summary>
         public bool IsHabitatOpen(Role role)
@@ -129,6 +332,13 @@ namespace AnimalEscape.Match
             if (IsServer)
             {
                 MapIndex.Value = PendingMapIndex;
+
+                // 主選單選的房間種類；測試房間一開就是設定畫面。
+                Mode.Value = RoomOptions.Mode;
+                RoomLink.Value = Networking.ConnectionManager.Instance != null ? Networking.ConnectionManager.Instance.Link : RoomOptions.Link;
+                TestRules.Value = RoomOptions.Mode == RoomMode.Test ? (int)RoomOptions.Rules : 0;
+                StartPhase.Value = RoomOptions.StartPhase;
+                InTestSetup.Value = RoomOptions.Mode == RoomMode.Test;
 
                 // 球和門禁卡等下一格再放（這一格地圖可能還沒切好，也避免在生成途中再生成別的網路物件）。
                 m_ResetLabPending = true;
