@@ -86,6 +86,7 @@ namespace AnimalEscape.Match
         bool m_ResetLabPending;
         Vector3 m_LastHolderPosition;
         double m_PickupAllowedAt;
+        ulong m_DroppedById = None;   // 自己按 Q 丟下卡的角色：要先走開才撿得回去
 
         // ------------------------------------------------------------------
         // 房間種類與測試模式的規則（每台電腦都可以問）
@@ -144,6 +145,15 @@ namespace AnimalEscape.Match
             get { return IsTestRoom && Instance.InTestSetup.Value; }
         }
 
+        /// <summary>
+        /// 測試房間的「逛地圖」：選好角色進地圖到處走，不比賽、不計時，收容區全開；
+        /// 這段期間換身分、換地圖都不會把收容區鎖回去，比賽條也沒有「開始比賽」。
+        /// </summary>
+        public static bool IsExploring
+        {
+            get { return IsTestRoom && Instance.StartPhase.Value == TestStart.Explore && !Instance.InTestSetup.Value; }
+        }
+
         /// <summary>主機端：打開或關掉一個測試規則（只有測試房間有效）。</summary>
         public void ServerSetRule(TestRule rule, bool on)
         {
@@ -182,7 +192,7 @@ namespace AnimalEscape.Match
 
             MatchFlow flow = GetComponent<MatchFlow>();
             TestStart phase = StartPhase.Value;
-            if (phase == TestStart.Lobby)
+            if (phase == TestStart.Lobby || phase == TestStart.Explore)
             {
                 if (flow != null && flow.Phase.Value != MatchPhase.Lobby)
                 {
@@ -194,7 +204,16 @@ namespace AnimalEscape.Match
                     PlayerSpawner.Instance.RespawnAllForMatch();
                 }
 
-                ServerLockAllHabitats();
+                // 逛地圖：收容區全開，動物出生在收容區裡也能直接走出去。
+                if (phase == TestStart.Explore)
+                {
+                    ServerOpenAllHabitats();
+                }
+                else
+                {
+                    ServerLockAllHabitats();
+                }
+
                 InTestSetup.Value = false;
                 return true;
             }
@@ -404,6 +423,12 @@ namespace AnimalEscape.Match
             {
                 PlayerSpawner.Instance.RespawnBots();
             }
+
+            // 測試房間的「逛地圖」：新地圖的收容區也全開。
+            if (IsExploring)
+            {
+                ServerOpenAllHabitats();
+            }
         }
 
         void OnMapChanged(int previous, int current)
@@ -507,6 +532,7 @@ namespace AnimalEscape.Match
             KeycardPosition.Value = lab.keycardSpots[spot];
             Keycard.Value = KeycardStatus.OnGround;
             m_PickupAllowedAt = PlayerCapture.Now;
+            m_DroppedById = None;
         }
 
         /// <summary>主機端：直接把門禁卡交給某個角色（測試工具用）。</summary>
@@ -520,6 +546,22 @@ namespace AnimalEscape.Match
             KeycardHolder.Value = avatar.NetworkObjectId;
             m_LastHolderPosition = avatar.transform.position;
             Keycard.Value = KeycardStatus.Held;
+            m_DroppedById = None;
+        }
+
+        /// <summary>
+        /// 主機端：拿著卡的動物自己按 Q 丟下（丟在腳邊，給隊友撿）。
+        /// 丟下的那一隻要先走開（離卡超過 keycardPickupRange＋keycardDropLeaveMargin）才撿得回去，別的動物照常撿。
+        /// </summary>
+        public void ServerDropKeycardBy(PlayerAvatar holder)
+        {
+            if (!IsServer || holder == null || Keycard.Value != KeycardStatus.Held || KeycardHolder.Value != holder.NetworkObjectId)
+            {
+                return;
+            }
+
+            ServerDropKeycard(holder.transform.position);
+            m_DroppedById = holder.NetworkObjectId;
         }
 
         /// <summary>
@@ -569,13 +611,25 @@ namespace AnimalEscape.Match
                 }
 
                 Vector3 offset = avatar.transform.position - card;
-                if (Mathf.Abs(offset.y) > 1.5f)
+                float vertical = Mathf.Abs(offset.y);
+                offset.y = 0f;
+                float distance = offset.magnitude;
+                if (m_DroppedById != None && avatar.NetworkObjectId == m_DroppedById)
+                {
+                    // 自己按 Q 丟下的：走開之後才算數，不然丟下的那一刻又撿回來。
+                    if (vertical > 1.5f || distance > config.keycardPickupRange + config.keycardDropLeaveMargin)
+                    {
+                        m_DroppedById = None;
+                    }
+
+                    continue;
+                }
+
+                if (vertical > 1.5f)
                 {
                     continue;
                 }
 
-                offset.y = 0f;
-                float distance = offset.magnitude;
                 if (distance <= bestDistance)
                 {
                     best = avatar;
@@ -608,6 +662,7 @@ namespace AnimalEscape.Match
             KeycardPosition.Value = position;
             Keycard.Value = KeycardStatus.OnGround;
             m_PickupAllowedAt = PlayerCapture.Now + GameConfig.Instance.keycardPickupDelay;
+            m_DroppedById = None;
         }
 
         /// <summary>現在實驗室裡的動物（每台電腦都能查）。</summary>

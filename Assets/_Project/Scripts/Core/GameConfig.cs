@@ -135,15 +135,18 @@ namespace AnimalEscape.Core
         [Tooltip("判斷網子有沒有被障礙物擋住時，從人類身上多高的地方算起（公尺，大約是手的高度）")]
         public float netOriginHeight = 1.1f;
 
-        [Header("追與抓：掙脫")]
-        [Tooltip("被網住倒在地上時，每按一下增加多少掙脫值（滿是 1）")]
-        [Range(0.005f, 1f)] public float struggleGainNetted = 0.06f;
+        [Header("追與抓：掙脫（2026-11-18 使用者試玩說太容易掙脫：改成要按比較多下，停下來會往回掉）")]
+        [Tooltip("被網住倒在地上時，每按一下增加多少掙脫值（滿是 1；0.025＝要按 40 下：每秒 5 下約 8 秒、7 下約 5.7 秒、10 下約 4 秒）")]
+        [Range(0.005f, 1f)] public float struggleGainNetted = 0.025f;
 
-        [Tooltip("被扛著時，每按一下增加多少掙脫值（比在地上難掙脫）")]
-        [Range(0.005f, 1f)] public float struggleGainCarried = 0.035f;
+        [Tooltip("被扛著時，每按一下增加多少掙脫值（比在地上難掙脫；只有關掉麻醉針時才用得到）")]
+        [Range(0.005f, 1f)] public float struggleGainCarried = 0.015f;
 
-        [Tooltip("沒有在按的時候，掙脫值每秒掉多少")]
-        public float struggleDecayPerSecond = 0.05f;
+        [Tooltip("沒在連續按的時候（離上一下超過 struggleIdleGraceSeconds），掙脫值每秒往回掉多少（0.25＝停 1 秒掉 25%，停 4 秒歸零）")]
+        public float struggleDecayPerSecond = 0.25f;
+
+        [Tooltip("兩下之間隔超過幾秒就算「沒在連續按」，掙脫值開始往回掉；連續按的時候不會掉")]
+        public float struggleIdleGraceSeconds = 0.3f;
 
         [Tooltip("兩次按鍵至少要隔幾秒才算數（防止用程式狂按）")]
         public float struggleMinPressInterval = 0.05f;
@@ -254,6 +257,9 @@ namespace AnimalEscape.Core
 
         [Tooltip("門禁卡掉在地上之後，過幾秒才撿得起來（免得掉下來的那一刻又被旁邊的人撿走）")]
         public float keycardPickupDelay = 0.6f;
+
+        [Tooltip("按 Q 丟下門禁卡的那隻動物，要走開到離卡超過「撿起距離＋這個數字」（公尺）之後，走回來才撿得回去；別的動物照常撿")]
+        public float keycardDropLeaveMargin = 0.5f;
 
         [Tooltip("拿著門禁卡在實驗室門口按住 E 幾秒，才刷得開")]
         public float keycardSwipeSeconds = 5f;

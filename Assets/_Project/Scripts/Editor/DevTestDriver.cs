@@ -61,6 +61,7 @@ namespace AnimalEscape.EditorTools
     ///     card [give P3|spot 2|reset|lab]
     ///                           （主機）看門禁卡在哪；直接交給 P3；放回第 2 個候選位置；隨機重放；重新放球和卡
     ///     swipe [秒數上限]       （拿著門禁卡的動物）在實驗室門口按住刷卡鍵，和按住 E 一樣；刷開、或超過上限（預設 15 秒）就放手
+    ///     dropcard              （拿著門禁卡的動物）按 Q 把卡丟在腳邊
     ///     emote 1～4            （在實驗室裡的動物）做表情，和按數字鍵一樣
     ///     screen                （在實驗室的控台旁）大螢幕換下一位隊友，和按 E 一樣
     ///     start                 （主機）開始比賽（和「開始比賽」「再來一局」按鈕一樣）
@@ -818,6 +819,13 @@ namespace AnimalEscape.EditorTools
                     StartSwipe(label, args);
                     break;
 
+                case "dropcard":
+                {
+                    PlayerKeycard keycard = PlayerKeycard.Local;
+                    Report(label, keycard != null && keycard.RequestDrop() ? "按了 Q：丟下門禁卡" : "失敗：沒有拿著門禁卡");
+                    break;
+                }
+
                 case "unlock":
                 case "lock":
                     SetHabitats(label, args, verb == "unlock");
@@ -1102,12 +1110,15 @@ namespace AnimalEscape.EditorTools
             Report(label, rule + (on ? " 開" : " 關") + "｜規則=" + (match != null && match.IsSpawned ? ((TestRule)match.TestRules.Value).ToString() : RoomOptions.Rules.ToString()));
         }
 
-        /// <summary>phase lobby|start|escaped|chaos|exit（測試房間的「從哪裡開始」）。</summary>
+        /// <summary>phase explore|lobby|start|escaped|chaos|exit（測試房間的「從哪裡開始」）。</summary>
         static void RunPhase(string label, string[] args)
         {
             TestStart phase;
             switch (args.Length > 0 ? args[0].ToLowerInvariant() : "")
             {
+                case "explore":
+                    phase = TestStart.Explore;
+                    break;
                 case "lobby":
                     phase = TestStart.Lobby;
                     break;
@@ -1124,7 +1135,7 @@ namespace AnimalEscape.EditorTools
                     phase = TestStart.ExitOpen;
                     break;
                 default:
-                    Report(label, "失敗：要寫 lobby、start、escaped、chaos 或 exit");
+                    Report(label, "失敗：要寫 explore、lobby、start、escaped、chaos 或 exit");
                     return;
             }
 

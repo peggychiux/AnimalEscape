@@ -444,8 +444,9 @@ namespace AnimalEscape.Players
             }
 
             // 動物每次出生都是關在自己的收容區裡，門要重新鎖上（烏龜的池塘沒有門，這一行對牠沒有作用）。
-            // 原地換身分時不鎖；同一種身分重複時，另一位已經在場上，也不要把他關回去。
-            if (Roles.IsAnimal(role) && MatchState.Instance != null && !inPlace && CountOthersWithRole(slot, role) == 0)
+            // 原地換身分時不鎖；同一種身分重複時，另一位已經在場上，也不要把他關回去；測試房間「逛地圖」時也不鎖。
+            if (Roles.IsAnimal(role) && MatchState.Instance != null && !inPlace && CountOthersWithRole(slot, role) == 0
+                && !MatchState.IsExploring)
             {
                 MatchState.Instance.ServerSetHabitatOpen(role, false);
             }

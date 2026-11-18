@@ -899,9 +899,13 @@ namespace AnimalEscape.UI
             GUI.Label(new Rect(x, y, w, 20f), "從哪裡開始", MenuKit.Label);
             y += 28f;
             TestStart phase = connected && match != null ? match.StartPhase.Value : RoomOptions.StartPhase;
-            for (int i = 0; i <= (int)TestStart.ExitOpen; i++)
+            TestStart[] phaseOrder =
             {
-                var value = (TestStart)i;
+                TestStart.Explore, TestStart.Lobby, TestStart.MatchStart, TestStart.Escaped, TestStart.ChaosFull, TestStart.ExitOpen
+            };
+            for (int i = 0; i < phaseOrder.Length; i++)
+            {
+                TestStart value = phaseOrder[i];
                 if (MenuKit.Radio(new Rect(x, y, w, 34f), phase == value, RoomOptions.StartPhaseName(value), canEditRoom, 15))
                 {
                     if (connected && match != null)
@@ -1183,6 +1187,7 @@ namespace AnimalEscape.UI
             "空白鍵　跳",
             "Shift　慢走（聲音比較小）",
             "E　互動（按一下或按住，看旁邊是什麼）",
+            "Q　（動物）丟下門禁卡給隊友",
             "滑鼠左鍵　（人類）揮網",
             "Esc　放開滑鼠，才點得到介面",
             "1～4　在實驗室裡做表情"
@@ -1193,7 +1198,7 @@ namespace AnimalEscape.UI
             "開場關在收容區：在門邊按住 E 撬鎖（烏龜從池塘出發）",
             "弄倒有橘色標記的東西，混亂值到 100% 出口解鎖",
             "到出口按住 E 開門，走進門外的貨車就算逃出",
-            "被網住：連按空白鍵掙脫（人類走過來扛你時會打麻醉針，睡著就不能掙扎，醒來會自己跳下來）",
+            "被網住：連按空白鍵掙脫（約 40 下，停下來會往回掉）；被人類扛起會打麻醉針，睡醒會自己跳下來",
             "隊友被麻醉睡在地上：走過去碰牠一下就會醒",
             "隊友被關進籠子：在籠子旁按住 E 救人",
             "第 3 次被抓會送進實驗室；拿門禁卡在實驗室門口按住 E，可以把裡面的放出來",

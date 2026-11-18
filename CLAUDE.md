@@ -150,7 +150,7 @@
   - **測試模式**：一進去就開測試房間（`RoomMode.Test`），測試房間的設定畫面蓋住整個遊戲（`MatchState.InTestSetup`），所有連進來的人都看到。
     每個人一列選身分（含「只看」＝None），房主可以改任何人（直接 `PlayerSpawner.AssignRole`），一般玩家只能改自己（規則允許時）；
     加電腦玩家（只能當動物，「人類」反灰）；4 個規則開關（`TestRule`：SelfPick、DuplicateRoles、SwapAnytime、NoTeamNeeded，預設全開）；
-    地圖；從哪裡開始（`TestStart`：Lobby、MatchStart、Escaped、ChaosFull、ExitOpen，`MatchState.ServerBeginTest`）；連線方式換了會關房重開。
+    地圖；從哪裡開始（`TestStart`：Lobby、MatchStart、Escaped、ChaosFull、ExitOpen、Explore，`MatchState.ServerBeginTest`）；連線方式換了會關房重開。
   - **F1 開發者面板**（`DevPanel`＋`DevActions`，只有測試房間）：房主改剩餘時間（分、秒；還沒開始時改的是一局多長）、暫停（`MatchFlow.PausedLeft`）、
     混亂值、直接開門、貨車剩 10 秒、東西復原、換地圖、重新開始、回到測試房間；每個人：原地換身分（`PlayerSlot.RequestRoleInPlace`）、
     打開所有收容區／送我進實驗室／從籠子放出來／回出生點（`PlayerSlot.RequestDev`，主機做完回一句話 `DevReply`）、瞬移（擁有者自己搬：`PlayerCapture.OwnerTeleport`）。
@@ -181,6 +181,28 @@
   - **實測**：扛起時睡 10 秒、過 3 秒掙脫值還是 0；10 秒到兔子跳到人類背後、人類踉蹌；扛著時瞬移到 5 號籠旁按 E 關進去（120 秒）；放下來繼續睡，再扛起來沒有重打（剩 0.9 秒照舊）；
     猴子走過去碰到睡在地上（還剩 8.3 秒）的兔子，牠馬上醒來、有 3 秒保護；Player 2 被麻醉時的畫面截圖看過。
   - **還沒測**：真人用鍵盤玩起來 10 秒夠不夠、會不會太好抓；數值都待試玩。
+- **2026-11-18 試玩後的修改已完成並實際執行驗證**（主視窗＋Player 2，DevTestDriver；使用者先說「等等再測，繼續改」，三項改完才一起測）：
+  - **掙脫變難**（使用者：「太快了、太容易掙脫，我想時間加長，沒連續點進度往回倒退」）：地上每按一下 +2.5%（`struggleGainNetted` 0.06 → 0.025，要按 40 下：
+    每秒 5 下約 8 秒、7 下約 5.7 秒（電腦動物）、10 下約 4 秒）；連續按的時候不掉，兩下之間隔超過 `struggleIdleGraceSeconds`（0.3 秒）就往回掉，
+    每秒 25%（`struggleDecayPerSecond` 0.05 → 0.25，意思從「一直在掉」改成「停下來才掉」，在 `PlayerCapture` 的主機端更新）。
+    肩上 `struggleGainCarried` 0.035 → 0.015（只有關掉麻醉針時才用得到，維持「肩上比地上難」）。`GameConfig.asset` 裡的值也一起改了。
+    畫面提示、主選單的「操作與規則」、README 都加了「停下來會往回掉」。
+  - **門禁卡按 Q 丟下**（使用者要的）：拿著卡時按 Q（手把 Y）把卡丟在腳邊給隊友撿（`PlayerKeycard.RequestDrop` → `DropRpc` →
+    `MatchState.ServerDropKeycardBy`）。丟下的那一隻要先走開（離卡超過 `keycardPickupRange` 1.2＋`keycardDropLeaveMargin` 0.5 公尺）
+    再走回來才撿得回去（`MatchState.m_DroppedById`，只有主機有），別的動物照常過 0.6 秒就能撿。拿著卡時畫面下方的提示多一行「按 Q 把門禁卡丟在地上」。
+    測試工具 `P2 dropcard`。沒有加 NetworkVariable（只多一個 RPC），所以舊版的打包檔照理還連得上，但朋友要用到 Q 丟卡就要重新打包。
+  - **測試模式加「逛地圖」**（使用者：「我可能想要選角色，但沒有要玩遊戲，只是進入地圖逛」）：「從哪裡開始」多一個 `TestStart.Explore`
+    （數值 5，放在最後才不會改到前面的值；畫面上排第一個）：和「準備中」一樣不比賽、不計時，但收容區全開（`ServerOpenAllHabitats`）。
+    `MatchState.IsExploring`（測試房間＋Explore＋設定畫面關著）成立時：換身分不會把收容區鎖回去（`PlayerSpawner.AssignRole`）、
+    換地圖後新地圖的收容區也全開（`SetMap`）、比賽條改成「逛地圖」而且沒有「開始比賽」（`GameHud.DrawMatchBar`）。測試工具 `main phase explore`。
+  - **實測**：編譯 0 錯誤；兩個視窗的 Console 沒有錯誤或警告。
+    - 掙脫：每秒 10 下連按 20 下停在 0.499（連續按不會掉）；停手後每秒掉約 0.25，大約 2 秒歸零；從 0 每秒 10 下連按，按到第 41 下（約 4 秒）掙脫。
+      測試工具的 `struggle` 按完會再等 0.4 秒才回報，所以回報的那一刻已經過了 0.3 秒的寬限、開始往回掉，看數字時要記得。
+    - Q 丟卡：兔子按 Q，卡掉在腳邊；站著不動 4 秒都沒撿回去；走開 2.6 公尺再走回來就撿回去；猴子隊友走到 1 公尺內就撿到。
+    - 逛地圖：開始後三個收容區全開；比賽條是「逛地圖」、沒有「開始比賽」（主機和用戶端的提示不同）；F1 原地換成猴子、用選身分換成浣熊（重新出生在收容區裡）、
+      換到 B 地圖，收容區都還是開的；「回到測試房間」改成「準備中」再開始，收容區照舊全部鎖上、比賽條有「開始比賽」。
+    - 截圖看過：被網住的面板（「連按 空白鍵 掙脫｜停下來會往回掉｜人類扛你時會打麻醉針」）、拿著卡的兩行提示、逛地圖和準備中的比賽條、測試房間的「從哪裡開始」（逛地圖排第一）。
+    - 電腦動物的掙脫秒數沒測（準備中電腦動物不動），照每秒 7 下算是約 5.7 秒。真的鍵盤（空白鍵、Q）還沒有人按過。
 - **線上房間（Relay）已連結並實際執行驗證**（2026-11-17 晚上，主視窗＋Player 2，DevTestDriver）：
   - 專案已連結 Unity Cloud（專案 AnimalEscape，`ProjectSettings.asset` 的 `cloudProjectId`）。是使用者自己在 Edit > Project Settings > Services
     選組織、選「Create a new cloud project」、按建立的：背景點擊打不開那一頁的下拉選單（會開成系統選單）。之後要動這一頁可以用測試工具的 `ui` 指令。
@@ -193,6 +215,7 @@
     打包完自動切回 macOS 平台。給朋友的是 `Builds/AnimalEscape-Windows.zip`（38 MB，不含 BurstDebugInformation 資料夾；`Builds/` 不進版本控制）。
     打包版裡有雲端專案 ID（`globalgamemanagers`、`StreamingAssets/UnityServicesProjectConfiguration.json`）。**還沒在真的 Windows 上跑過。**
     Hub 在背景時畫面不會重畫（截圖是舊的），選單也點不開，Hub 的操作請使用者自己點比較快。
+    2026-11-18 中午打包第二版（掙脫變難、門禁卡按 Q 丟下、測試模式逛地圖；打包 10 秒），換掉 `download` 分支上的 zip。
 - M4 動工前和使用者討論定案的內容（細節寫進企劃書 3.2、3.3、3.4、7.1.1 和開發計畫的 M4）：
   按 E 破壞（小按一下、大按住 1～3 秒）、小中大 +2／5／10％、人類 15／25／40 公尺聽得到、每張地圖約 40 個、壞了不恢復；
   3 台控制台（按住 5 秒、−15％、冷卻 60 秒）；出口移到離收容區都遠的牆（A 北牆中間 x −3～3、B 西牆 z −9～−3、C 西牆 z −3～3，
@@ -341,7 +364,7 @@
 
 ## 版本控制
 
-- GitHub（私人）：`peggychiux/AnimalEscape`，分支 `main`。2026-11-16 建立，第一版包含 M0–M2。
+- GitHub（**公開**，2026-11-17 起；之前是私人）：`peggychiux/AnimalEscape`，分支 `main`。2026-11-16 建立，第一版包含 M0–M2。
 - **使用者說要存檔或推上去時才 commit／push**，不要自己決定。一個里程碑一版，訊息用中文（例：`M3：捕捉籠與救援`）。
 - 作者資訊已經設在這個儲存庫的 git 設定裡（GitHub 帳號名稱＋GitHub 的隱藏信箱）。**不要改成使用者的真實信箱**，
   也不要把真實信箱寫進任何會進版本控制的檔案。
@@ -356,7 +379,8 @@
 - **給朋友的下載**（2026-11-17）：打包好的遊戲放在 `download` 分支（孤立分支，只有 zip 和 README，和 `main` 的歷史分開），
   README 的下載指令用 `https://raw.githubusercontent.com/peggychiux/AnimalEscape/download/AnimalEscape-Windows.zip`。
   更新遊戲時在雲端重做一個只有一個 commit 的 `download` 分支再 `git push -f origin download`，舊的 zip 才不會一直留在分支歷史裡。
-  使用者 2026-11-17 決定把 repo 改成**公開**（朋友要用 GPT 下載，私人 repo 下載不到），改公開要使用者自己在 GitHub 的 Settings 按。
+  使用者 2026-11-17 把 repo 改成**公開**（朋友要用 GPT 下載，私人 repo 下載不到；是使用者自己在 GitHub 的 Settings 改的）。
+  改公開後實測：不帶登入資訊下載上面的網址 HTTP 200，檔案和打包出來的 zip 一模一樣（md5 相同）。
   公開前檢查過：所有 commit 都是 noreply 信箱，追蹤的檔案裡沒有信箱或金鑰。之後也不能把任何私人資料放進 repo。
 
 ## 架構規則
@@ -518,6 +542,7 @@ Unity 在背景也照常運作，所以整個「改程式 → 編譯 → 進 Pla
    main lab P2             （主機）直接把 P2 送進實驗室
    main card [give P3|spot 2|reset|lab]   （主機）看門禁卡在哪／直接交給 P3／放回第 2 個候選位置／隨機重放／重新放球和卡
    P1 swipe                （拿著卡的動物）在實驗室門口按住刷卡鍵直到刷開；swipe 2 表示最多按 2 秒
+   P1 dropcard             （拿著卡的動物）按 Q 把門禁卡丟在腳邊
    P2 emote 2              （實驗室裡的動物）做第 2 號表情（1 揮手、2 跳舞、3 轉圈、4 開心跳）
    P2 screen               （實驗室控台旁）大螢幕換下一位隊友；report 的「大螢幕=」看現在播誰
    main start              （主機）開始比賽（和「開始比賽」「再來一局」按鈕一樣）
@@ -533,7 +558,7 @@ Unity 在背景也照常運作，所以整個「改程式 → 編譯 → 進 Pla
    main create lan 5       開始遊戲 › 建立房間（lan／online、幾分鐘）；main host 一律開正式房間（同一個 Wi-Fi）
    main link lan           測試房間換連法（thiscomputer／lan／online，會關房重開）
    vp lan                  列出「附近的房間」（不在開始遊戲畫面就先切過去）；vp lan join 1 加入第 1 個；vp joinip 127.0.0.1 直接輸入 IP 加入
-   main rule dup off       測試房間的規則開關（selfpick／dup／swap／noteam，on／off）；main phase exit 從哪裡開始（lobby／start／escaped／chaos／exit）
+   main rule dup off       測試房間的規則開關（selfpick／dup／swap／noteam，on／off）；main phase exit 從哪裡開始（explore／lobby／start／escaped／chaos／exit）
    main begintest          按「開始測試」；main setup 回到測試房間；main assign P2 Rabbit 房主幫別人選身分（None＝只看）
    main devpanel on        打開 F1 面板（off 關掉）；dev 指令和面板的按鈕走同一段程式：
    main dev time 2 30      dev time 分 秒｜pause｜chaos 40｜chaos+10｜full｜openexit｜truck10｜restore｜swap Monkey｜habitats｜mylab｜release｜tp exit|lab|cage|spawn｜nextmap｜restart｜setup
@@ -581,7 +606,7 @@ Unity 在背景也照常運作，所以整個「改程式 → 編譯 → 進 Pla
   **測完記得取消勾選**，不然使用者每次按 Play 都會多開一個視窗。
 - **Unity 重開之後**：(1) 它只會執行「啟動之後才寫進去」的指令，啟動前寫的要重下；(2) Multiplayer Play Mode 的 Player 2
   會變回沒勾選，要用電腦操作功能在背景勾一次（勾選框在視窗座標 (17,206) 附近），約 30 秒才開好；
-  (3) 專案是從 Unity Hub 開的（2026-11-17 用電腦操作功能點專案清單）。先開 Unity、確認遙控器有回應，再送新程式和 `refresh`，
+  (3) 專案要從 Unity Hub 開：2026-11-18 Hub 在背景時點專案清單只會選取那一列、打不開，要請使用者點一下（Unity 已經開著的話用 `main restart` 重開）。先開 Unity、確認遙控器有回應，再送新程式和 `refresh`，
   這樣萬一編譯壞了，舊的遙控器還在，不會卡在「進入安全模式」的對話框。
 - Unity 在背景時畫面更新比較慢，`walk` 快到終點時常常停在離目標約 0.1 公尺、回報「被擋住」；看「離目標」的數字，0.1 左右就是走到了。
   量速度用兩個 `thru` 點之間的時間差（結果的時間戳記）最準。

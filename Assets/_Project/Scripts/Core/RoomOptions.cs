@@ -47,7 +47,10 @@ namespace AnimalEscape.Core
         ChaosFull = 3,
 
         /// <summary>出口已開（貨車倒數中）。</summary>
-        ExitOpen = 4
+        ExitOpen = 4,
+
+        /// <summary>逛地圖：選好角色進地圖到處走，不比賽、不計時，收容區全開（2026-11-18 使用者要的）。放在最後才不會改到前面的數值。</summary>
+        Explore = 5
     }
 
     /// <summary>房間怎麼連：只用這台電腦、同一個 Wi-Fi（區域網路）、線上（Relay，給代碼）。</summary>
@@ -89,6 +92,8 @@ namespace AnimalEscape.Core
                     return "混亂值已滿（出口解鎖）";
                 case TestStart.ExitOpen:
                     return "出口已開（貨車倒數中）";
+                case TestStart.Explore:
+                    return "逛地圖（不比賽，收容區全開）";
                 default:
                     return phase.ToString();
             }

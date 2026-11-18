@@ -582,8 +582,12 @@ namespace AnimalEscape.Players
 
             if (IsHeld)
             {
-                // 掙脫值沒在按的時候會慢慢掉。每 0.1 秒才同步一次，不用每一格都送。
-                m_StruggleExact = Mathf.Max(0f, m_StruggleExact - config.struggleDecayPerSecond * Time.deltaTime);
+                // 掙脫值：沒在連續按（離上一下超過 struggleIdleGraceSeconds）的時候往回掉，連續按的時候不掉。
+                // 每 0.1 秒才同步一次，不用每一格都送。
+                if (Now - m_LastStrugglePressAt > config.struggleIdleGraceSeconds)
+                {
+                    m_StruggleExact = Mathf.Max(0f, m_StruggleExact - config.struggleDecayPerSecond * Time.deltaTime);
+                }
                 m_StruggleSyncTimer -= Time.deltaTime;
                 if (m_StruggleSyncTimer <= 0f)
                 {

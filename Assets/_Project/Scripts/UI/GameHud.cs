@@ -281,6 +281,17 @@ namespace AnimalEscape.UI
                 {
                     var panel = new Rect((width - 560f) * 0.5f, 12f, 560f, 70f);
                     UiKit.Panel(panel);
+                    if (MatchState.IsExploring)
+                    {
+                        // 測試房間的「逛地圖」：不會開始比賽，所以沒有「開始比賽」按鈕。
+                        GUI.Label(new Rect(panel.x + 12f, panel.y + 6f, panel.width - 24f, 24f), "逛地圖（不比賽、不計時，收容區全開）", UiKit.Header);
+                        GUI.Label(new Rect(panel.x + 12f, panel.y + 32f, panel.width - 24f, 22f), isHost
+                            ? "按 F1 可以換角色、瞬移；要比賽就在 F1 按「回到測試房間」換開始方式"
+                            : "按 F1 可以換角色、瞬移；要比賽等房主回到測試房間", UiKit.Hint);
+                        UiKit.Bar(new Rect(panel.x + 12f, panel.y + 56f, panel.width - 24f, 8f), flow.Chaos.Value / 100f, k_BarChaos);
+                        return panel;
+                    }
+
                     GUI.Label(new Rect(panel.x + 12f, panel.y + 6f, panel.width - 180f, 24f), "準備中（自由練習，不計時）", UiKit.Header);
                     string reason;
                     bool canStart = CanStartMatch(out reason);
@@ -814,7 +825,7 @@ namespace AnimalEscape.UI
                 GUI.Label(new Rect(panel.x, panel.y + 8f, panel.width, 34f), title, UiKit.Title);
                 GUI.Label(new Rect(panel.x, panel.y + 44f, panel.width, 26f),
                     state == CaptureState.Netted && GameConfig.Instance.tranquilizeOnPickup
-                        ? "連按 空白鍵 掙脫｜人類走過來扛你時會打麻醉針" : "連按 空白鍵 掙脫", UiKit.Center);
+                        ? "連按 空白鍵 掙脫｜停下來會往回掉｜人類扛你時會打麻醉針" : "連按 空白鍵 掙脫｜停下來會往回掉", UiKit.Center);
                 UiKit.Bar(new Rect(panel.x + 20f, panel.y + 80f, panel.width - 40f, 22f), mine.Struggle.Value, k_BarStruggle);
                 return;
             }
@@ -863,7 +874,7 @@ namespace AnimalEscape.UI
                 }
 
                 bool atDoor = keycard.DoorInReach != null;
-                var hint = new Rect((width - 520f) * 0.5f, height - 84f, 520f, 40f);
+                var hint = new Rect((width - 520f) * 0.5f, height - 104f, 520f, 60f);
                 UiKit.Panel(hint);
                 string text;
                 if (!atDoor)
@@ -879,7 +890,8 @@ namespace AnimalEscape.UI
                     text = "實驗室裡現在沒有隊友，先留著卡（整場只能刷一次）";
                 }
 
-                GUI.Label(hint, text, UiKit.Center);
+                GUI.Label(new Rect(hint.x, hint.y + 6f, hint.width, 26f), text, UiKit.Center);
+                GUI.Label(new Rect(hint.x, hint.y + 34f, hint.width, 20f), "按 Q 把門禁卡丟在地上，隊友走過去就能撿", UiKit.Tag);
                 return;
             }
 
@@ -1152,7 +1164,7 @@ namespace AnimalEscape.UI
             {
                 GUILayout.Label(local.CurrentRole.Value == Role.Human
                     ? "滑鼠左鍵揮網　E 扛起／放下／關進籠子"
-                    : "被網住或被扛著：連按空白鍵掙脫", UiKit.Hint);
+                    : "被網住：連按空白鍵掙脫，停下來會往回掉", UiKit.Hint);
                 GUILayout.Label(local.CurrentRole.Value == Role.Human
                     ? "在保全控制台按住 E：混亂值 −15%"
                     : "在東西旁邊按 E 弄倒（大的要按住）", UiKit.Hint);

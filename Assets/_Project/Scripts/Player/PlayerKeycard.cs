@@ -13,6 +13,8 @@ namespace AnimalEscape.Players
     /// 做法和救援（PlayerRescue）、撬鎖（PlayerLockpick）一樣：玩家端只送出「開始刷／放手」，主機確認之後計時。
     /// 中途放手、走開、被網住，進度就歸零（被網住時卡還會掉在地上，見 MatchState）。
     /// 三種按住 E 的動作同時都可以做時，救人優先、刷卡其次、撬鎖最後。
+    ///
+    /// 拿著卡時按 Q（手把 Y）把卡丟在腳邊，給隊友撿（2026-11-18 使用者要的）。丟下的那一隻要先走開才撿得回去（MatchState.ServerDropKeycardBy）。
     /// </summary>
     [RequireComponent(typeof(PlayerAvatar))]
     public class PlayerKeycard : NetworkBehaviour
@@ -34,6 +36,7 @@ namespace AnimalEscape.Players
         PlayerCapture m_Capture;
         PlayerRescue m_Rescue;
         InputAction m_HoldAction;
+        InputAction m_DropAction;
         bool m_ExternalHold;
         double m_NextRequestAt;
 
@@ -130,6 +133,11 @@ namespace AnimalEscape.Players
                 m_HoldAction.AddBinding("<Keyboard>/e");
                 m_HoldAction.AddBinding("<Gamepad>/buttonWest");
                 m_HoldAction.Enable();
+
+                m_DropAction = new InputAction("Drop Keycard", InputActionType.Button);
+                m_DropAction.AddBinding("<Keyboard>/q");
+                m_DropAction.AddBinding("<Gamepad>/buttonNorth");
+                m_DropAction.Enable();
             }
         }
 
@@ -140,6 +148,13 @@ namespace AnimalEscape.Players
                 m_HoldAction.Disable();
                 m_HoldAction.Dispose();
                 m_HoldAction = null;
+            }
+
+            if (m_DropAction != null)
+            {
+                m_DropAction.Disable();
+                m_DropAction.Dispose();
+                m_DropAction = null;
             }
 
             if (Local == this)
@@ -168,6 +183,11 @@ namespace AnimalEscape.Players
 
         void OwnerUpdate()
         {
+            if (InputGate.GameInputAllowed && m_DropAction != null && m_DropAction.WasPressedThisFrame())
+            {
+                RequestDrop();
+            }
+
             bool hold = m_ExternalHold
                 || (InputGate.GameInputAllowed && m_HoldAction != null && m_HoldAction.IsPressed());
             bool rescueFirst = m_Rescue != null && m_Rescue.CageInReach != null;
@@ -186,6 +206,28 @@ namespace AnimalEscape.Players
             {
                 m_NextRequestAt = now + k_RequestInterval;
                 CancelRpc();
+            }
+        }
+
+        /// <summary>丟下門禁卡（按 Q；測試工具也走這裡）。沒拿著卡就不做事，回傳 false。</summary>
+        public bool RequestDrop()
+        {
+            if (!IsSpawned || !IsOwner || !HoldsKeycard)
+            {
+                return false;
+            }
+
+            DropRpc();
+            return true;
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+        void DropRpc()
+        {
+            ServerStop();
+            if (MatchState.Instance != null && HoldsKeycard)
+            {
+                MatchState.Instance.ServerDropKeycardBy(m_Avatar);
             }
         }
 

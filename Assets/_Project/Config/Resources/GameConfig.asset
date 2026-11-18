@@ -75,9 +75,10 @@ MonoBehaviour:
   netCooldown: 1.5
   netMaxHeightDifference: 1.8
   netOriginHeight: 1.1
-  struggleGainNetted: 0.06
-  struggleGainCarried: 0.035
-  struggleDecayPerSecond: 0.05
+  struggleGainNetted: 0.025
+  struggleGainCarried: 0.015
+  struggleDecayPerSecond: 0.25
+  struggleIdleGraceSeconds: 0.3
   struggleMinPressInterval: 0.05
   breakFreeProtectionSeconds: 3
   pickupRange: 2
