@@ -62,8 +62,11 @@ namespace AnimalEscape.UI
                 return;
             }
 
+            // Mac 的 F1 預設是調亮度（要按 fn＋F1 才是 F1），所以 ` 鍵（1 左邊那顆）也可以開關；在面板的輸入框打字時不算。
             Keyboard keyboard = Keyboard.current;
-            if (Application.isFocused && keyboard != null && keyboard.f1Key.wasPressedThisFrame)
+            bool pressed = keyboard != null
+                && (keyboard.f1Key.wasPressedThisFrame || (keyboard.backquoteKey.wasPressedThisFrame && !InputGate.Typing));
+            if (Application.isFocused && pressed)
             {
                 SetOpen(!Open);
             }
@@ -87,7 +90,7 @@ namespace AnimalEscape.UI
             HandleEnterKey();
 
             // 放在上方比賽條（高 70）的下面，不要蓋住剩餘時間和混亂值（改了馬上看得到）。
-            var panel = new Rect(width - k_Width - 16f, 88f, k_Width, Mathf.Min(height - 104f, 616f));
+            var panel = new Rect(width - k_Width - 16f, 88f, k_Width, Mathf.Min(height - 104f, 662f));
             MenuKit.PanelBox(panel);
             float x = panel.x + 22f;
             float inner = panel.width - 44f;
@@ -176,6 +179,21 @@ namespace AnimalEscape.UI
                 if (MenuKit.Button(new Rect(x + i * (quarter + 6f), y, quarter, 40f), spots[i], MenuKit.Tone.Secondary, 14))
                 {
                     Say(DevActions.Teleport((DevActions.Spot)i));
+                }
+            }
+
+            // 第二排：直接丟進某個空間裡（實驗室、貨車、研究室、收容區）。
+            y += 46f;
+            string[] insides = { "實驗室裡", "貨車裡", "研究室", "收容區（輪流）" };
+            DevActions.Spot[] insideSpots =
+            {
+                DevActions.Spot.LabInside, DevActions.Spot.TruckInside, DevActions.Spot.ResearchRoom, DevActions.Spot.Habitat
+            };
+            for (int i = 0; i < insides.Length; i++)
+            {
+                if (MenuKit.Button(new Rect(x + i * (quarter + 6f), y, quarter, 40f), insides[i], MenuKit.Tone.Secondary, 14))
+                {
+                    Say(DevActions.Teleport(insideSpots[i]));
                 }
             }
 

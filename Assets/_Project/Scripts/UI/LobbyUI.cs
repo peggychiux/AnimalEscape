@@ -438,7 +438,7 @@ namespace AnimalEscape.UI
                 case 1:
                     title = "測試模式";
                     body = "開發用的房間：每個人的角色可以自由配、可以重複，比賽中可以原地換身分；可以從任何一個階段開始（例如直接從出口已開開始），"
-                           + "也可以加電腦玩家補位。進遊戲後按 F1 打開開發者面板。";
+                           + "也可以加電腦玩家補位，也可以選大家出生在實驗室或貨車裡。進遊戲後按 F1（Mac 要按 fn＋F1）或 ` 鍵打開開發者面板。";
                     return;
                 case 2:
                     title = "設定";
@@ -921,12 +921,34 @@ namespace AnimalEscape.UI
                 y += 36f;
             }
 
+            // 出生在哪裡：預設是各自的出生點；選了空間，按「開始測試」後大家都出生在那裡。
             y += 8f;
-            var hint = new Rect(x, y, w, 72f);
-            MenuKit.InsetBox(hint);
-            GUI.Label(new Rect(hint.x + 12f, hint.y + 8f, hint.width - 24f, hint.height - 16f),
-                "進遊戲後按 F1 打開開發者面板：房主改時間、混亂值、出口；每個人都能換自己的角色、瞬移",
-                MenuKit.Styled(14, false, TextAnchor.UpperLeft, MenuKit.Soft));
+            GUI.Label(new Rect(x, y, w, 20f), "出生在哪裡", MenuKit.Label);
+            y += 26f;
+            TestSpawn spawn = connected && match != null ? match.SpawnSpace.Value : RoomOptions.SpawnSpace;
+            TestSpawn[] spawnOrder = { TestSpawn.Default, TestSpawn.ResearchRoom, TestSpawn.LabInside, TestSpawn.TruckInside };
+            float spawnWidth = (w - 6f * (spawnOrder.Length - 1)) / spawnOrder.Length;
+            GUI.enabled = canEditRoom;
+            for (int i = 0; i < spawnOrder.Length; i++)
+            {
+                TestSpawn value = spawnOrder[i];
+                if (MenuKit.Choice(new Rect(x + i * (spawnWidth + 6f), y, spawnWidth, 36f), RoomOptions.SpawnSpaceName(value), spawn == value, true, 14))
+                {
+                    if (connected && match != null)
+                    {
+                        match.ServerSetSpawnSpace(value);
+                    }
+                    else
+                    {
+                        RoomOptions.SpawnSpace = value;
+                    }
+                }
+            }
+
+            GUI.enabled = true;
+            y += 42f;
+            GUI.Label(new Rect(x, y, w, 18f), "門關著時進去會出不來：按 F1 或 ` 開面板瞬移出來",
+                MenuKit.Styled(12, false, TextAnchor.UpperLeft, MenuKit.Muted));
 
             var startButton = new Rect(x, start.yMax - 20f - 58f, w, 58f);
             if (Time.unscaledTime - m_NoticeTime < 4f && !string.IsNullOrEmpty(m_Notice))

@@ -46,6 +46,10 @@ namespace AnimalEscape.Match
         float m_Lift;
         MaterialPropertyBlock m_Block;
 
+        // 貨車入口的橫梁（只留 1.2 公尺高，人類進不去）和它前面的黃線；測試房間「逛地圖」時拿掉，人類也能進車廂看。
+        Collider m_LintelCollider;
+        Renderer[] m_LintelRenderers = new Renderer[0];
+
         /// <summary>門前、地圖裡面那一側的點（站這裡開門）。</summary>
         public Vector3 InsidePoint
         {
@@ -75,6 +79,23 @@ namespace AnimalEscape.Match
             }
 
             m_Block = new MaterialPropertyBlock();
+
+            // 名字照 PrototypeBuilder.BuildExit：出口底下的 Truck／Low Entrance、Entrance Stripe。
+            var renderers = new List<Renderer>();
+            Transform lintel = transform.Find("Truck/Low Entrance");
+            if (lintel != null)
+            {
+                m_LintelCollider = lintel.GetComponent<Collider>();
+                renderers.AddRange(lintel.GetComponentsInChildren<Renderer>());
+            }
+
+            Transform stripe = transform.Find("Truck/Entrance Stripe");
+            if (stripe != null)
+            {
+                renderers.AddRange(stripe.GetComponentsInChildren<Renderer>());
+            }
+
+            m_LintelRenderers = renderers.ToArray();
         }
 
         void OnEnable()
@@ -93,10 +114,26 @@ namespace AnimalEscape.Match
         void Update()
         {
             MatchFlow flow = MatchFlow.Instance;
-            bool open = flow != null && flow.ExitOpen.Value;
+
+            // 測試房間的「逛地圖」：每台電腦各自把門打開、拿掉貨車入口的橫梁，誰都能走進車廂看。
+            // 這不是真的開門（MatchFlow.ExitOpen 沒變）：貨車不會倒數，走進車廂也不算上了貨車。
+            bool exploring = MatchState.IsExploring;
+            bool open = exploring || (flow != null && flow.ExitOpen.Value);
             if (blocker != null && blocker.enabled == open)
             {
                 blocker.enabled = !open;
+            }
+
+            if (m_LintelCollider != null && m_LintelCollider.enabled == exploring)
+            {
+                m_LintelCollider.enabled = !exploring;
+                for (int i = 0; i < m_LintelRenderers.Length; i++)
+                {
+                    if (m_LintelRenderers[i] != null)
+                    {
+                        m_LintelRenderers[i].enabled = !exploring;
+                    }
+                }
             }
 
             m_Lift = Mathf.MoveTowards(m_Lift, open ? 2.4f : 0f, 2.5f * Time.deltaTime);

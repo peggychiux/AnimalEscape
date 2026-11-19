@@ -58,6 +58,9 @@ namespace AnimalEscape.Match
         /// <summary>測試房間的設定畫面開著（還沒按「開始測試」，或按了 F1 面板的「回到測試房間」）。</summary>
         public readonly NetworkVariable<bool> InTestSetup = new NetworkVariable<bool>(false);
 
+        /// <summary>測試房間的「出生在哪裡」（房主選，大家都看得到；正式房間一律是預設）。出生點由 PlayerSpawner.GetSpawnPoint 照這個改。</summary>
+        public readonly NetworkVariable<TestSpawn> SpawnSpace = new NetworkVariable<TestSpawn>(TestSpawn.Default);
+
         /// <summary>
         /// 哪幾個收容區的門已經開了：第 n 個位元對應 Role 的數值（例如兔子是 2）。
         /// 動物每次出生（選身分）時，牠的收容區會重新鎖上；換地圖時全部重新鎖上。
@@ -165,6 +168,16 @@ namespace AnimalEscape.Match
             int value = on ? (TestRules.Value | (int)rule) : (TestRules.Value & ~(int)rule);
             TestRules.Value = value;
             RoomOptions.Rules = (TestRule)value;
+        }
+
+        /// <summary>主機端：測試房間的「出生在哪裡」（下次出生、開始測試、回出生點時生效）。</summary>
+        public void ServerSetSpawnSpace(TestSpawn space)
+        {
+            if (IsServer && IsTest)
+            {
+                SpawnSpace.Value = space;
+                RoomOptions.SpawnSpace = space;
+            }
         }
 
         /// <summary>主機端：測試要從哪個階段開始。</summary>
@@ -357,6 +370,7 @@ namespace AnimalEscape.Match
                 RoomLink.Value = Networking.ConnectionManager.Instance != null ? Networking.ConnectionManager.Instance.Link : RoomOptions.Link;
                 TestRules.Value = RoomOptions.Mode == RoomMode.Test ? (int)RoomOptions.Rules : 0;
                 StartPhase.Value = RoomOptions.StartPhase;
+                SpawnSpace.Value = RoomOptions.Mode == RoomMode.Test ? RoomOptions.SpawnSpace : TestSpawn.Default;
                 InTestSetup.Value = RoomOptions.Mode == RoomMode.Test;
 
                 // 球和門禁卡等下一格再放（這一格地圖可能還沒切好，也避免在生成途中再生成別的網路物件）。

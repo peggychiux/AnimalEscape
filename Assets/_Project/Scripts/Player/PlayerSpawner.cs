@@ -590,6 +590,12 @@ namespace AnimalEscape.Players
         /// </summary>
         public static void GetSpawnPoint(Role role, int ordinal, out Vector3 position, out Quaternion rotation)
         {
+            // 測試房間選了「出生在哪裡」：大家都出生在那個空間裡（照身分和第幾位分到不同的空位）。
+            if (TryGetTestSpawn(role, ordinal, out position, out rotation))
+            {
+                return;
+            }
+
             GetSpawnPoint(role, out position, out rotation);
             if (ordinal <= 0)
             {
@@ -598,6 +604,108 @@ namespace AnimalEscape.Players
 
             float side = ((ordinal + 1) / 2) * 0.9f * (ordinal % 2 == 1 ? 1f : -1f);
             position += rotation * Vector3.right * side;
+        }
+
+        // 空間裡的候選位置（空間自己的座標：x 往右、y 往前，公尺）：先排中間一排，再前一排、後一排。
+        static readonly Vector2[] k_TestSpawnOffsets =
+        {
+            new Vector2(0f, 0f), new Vector2(-1.1f, 0f), new Vector2(1.1f, 0f), new Vector2(-2.2f, 0f), new Vector2(2.2f, 0f),
+            new Vector2(0f, 1.1f), new Vector2(-1.1f, 1.1f), new Vector2(1.1f, 1.1f), new Vector2(-2.2f, 1.1f), new Vector2(2.2f, 1.1f),
+            new Vector2(0f, -1.1f), new Vector2(-1.1f, -1.1f), new Vector2(1.1f, -1.1f), new Vector2(-2.2f, -1.1f), new Vector2(2.2f, -1.1f)
+        };
+
+        /// <summary>
+        /// 測試房間的「出生在哪裡」選了某個空間時，這個身分（第幾位）的出生位置。沒選、不是測試房間、地圖上找不到那個空間就回傳 false。
+        /// 每個身分、每一位分到第 slot 個「放得下」的候選位置：大家用同一個大小（人類）檢查、同一個順序，所以一個一個出生也不會分到同一格。
+        /// </summary>
+        static bool TryGetTestSpawn(Role role, int ordinal, out Vector3 position, out Quaternion rotation)
+        {
+            position = Vector3.zero;
+            rotation = Quaternion.identity;
+            MatchState match = MatchState.Instance;
+            if (!MatchState.IsTestRoom || match == null)
+            {
+                return false;
+            }
+
+            Vector3 center;
+            Vector3 facing;
+            switch (match.SpawnSpace.Value)
+            {
+                case TestSpawn.ResearchRoom:
+                {
+                    GetSpawnPoint(Role.Human, out center, out rotation);
+                    facing = rotation * Vector3.forward;
+                    break;
+                }
+
+                case TestSpawn.LabInside:
+                {
+                    LabRoom lab = LabRoom.Current;
+                    if (lab == null)
+                    {
+                        return false;
+                    }
+
+                    // 門裡面 3 公尺、面向房間裡面（大螢幕那一面）。
+                    center = lab.doorPoint - lab.doorOutward * 3f;
+                    facing = -lab.doorOutward;
+                    break;
+                }
+
+                case TestSpawn.TruckInside:
+                {
+                    ExitDoor door = ExitDoor.Current;
+                    if (door == null)
+                    {
+                        return false;
+                    }
+
+                    // 車廂正中央、面向車門（地圖那一側）。
+                    center = door.truckCenter;
+                    facing = -door.transform.forward;
+                    break;
+                }
+
+                default:
+                    return false;
+            }
+
+            facing.y = 0f;
+            rotation = Quaternion.LookRotation(facing.sqrMagnitude > 0.001f ? facing.normalized : Vector3.forward, Vector3.up);
+            Vector3 right = rotation * Vector3.right;
+            Vector3 forward = rotation * Vector3.forward;
+            center.y = Mathf.Max(center.y, 0.05f);
+
+            int slot = Mathf.Max(0, (int)role - 1) + Mathf.Max(0, ordinal) * 5;
+            RoleSettings human = GameConfig.Instance.GetRole(Role.Human);
+            float radius = human != null ? human.radius : 0.35f;
+            float height = human != null ? Mathf.Max(human.height, radius * 2f) : 1.8f;
+
+            int found = 0;
+            for (int pass = 0; pass < 2; pass++)
+            {
+                for (int i = 0; i < k_TestSpawnOffsets.Length; i++)
+                {
+                    Vector3 point = center + right * k_TestSpawnOffsets[i].x + forward * k_TestSpawnOffsets[i].y;
+                    if (pass == 0 && !PlayerCapture.IsSpaceFree(point, radius, height, Physics.DefaultRaycastLayers))
+                    {
+                        continue;
+                    }
+
+                    if (found == slot)
+                    {
+                        position = point;
+                        return true;
+                    }
+
+                    found++;
+                }
+            }
+
+            // 人比空位多：疊在中間（推擠會把大家推開）。
+            position = center;
+            return true;
         }
 
         static void GetSpawnPoint(Role role, out Vector3 position, out Quaternion rotation)

@@ -463,6 +463,10 @@ namespace AnimalEscape.EditorTools
                     RunPhase(label, args);
                     break;
 
+                case "spawnat":
+                    RunSpawnAt(label, args);
+                    break;
+
                 case "begintest":
                 {
                     MatchState match = MatchState.Instance;
@@ -1110,6 +1114,42 @@ namespace AnimalEscape.EditorTools
             Report(label, rule + (on ? " 開" : " 關") + "｜規則=" + (match != null && match.IsSpawned ? ((TestRule)match.TestRules.Value).ToString() : RoomOptions.Rules.ToString()));
         }
 
+        /// <summary>spawnat default|research|lab|truck（測試房間的「出生在哪裡」）。</summary>
+        static void RunSpawnAt(string label, string[] args)
+        {
+            TestSpawn space;
+            switch (args.Length > 0 ? args[0].ToLowerInvariant() : "")
+            {
+                case "default":
+                    space = TestSpawn.Default;
+                    break;
+                case "research":
+                    space = TestSpawn.ResearchRoom;
+                    break;
+                case "lab":
+                    space = TestSpawn.LabInside;
+                    break;
+                case "truck":
+                    space = TestSpawn.TruckInside;
+                    break;
+                default:
+                    Report(label, "失敗：要寫 default、research、lab 或 truck");
+                    return;
+            }
+
+            MatchState match = MatchState.Instance;
+            if (match != null && match.IsSpawned && match.IsServer)
+            {
+                match.ServerSetSpawnSpace(space);
+            }
+            else
+            {
+                RoomOptions.SpawnSpace = space;
+            }
+
+            Report(label, "出生在=" + space);
+        }
+
         /// <summary>phase explore|lobby|start|escaped|chaos|exit（測試房間的「從哪裡開始」）。</summary>
         static void RunPhase(string label, string[] args)
         {
@@ -1241,6 +1281,10 @@ namespace AnimalEscape.EditorTools
                     DevActions.Spot spot = where == "exit" ? DevActions.Spot.Exit
                         : where == "lab" ? DevActions.Spot.LabDoor
                         : where == "cage" ? DevActions.Spot.NearestCage
+                        : where == "labin" ? DevActions.Spot.LabInside
+                        : where == "truck" ? DevActions.Spot.TruckInside
+                        : where == "research" ? DevActions.Spot.ResearchRoom
+                        : where == "habitat" ? DevActions.Spot.Habitat
                         : DevActions.Spot.Spawn;
                     result = DevActions.Teleport(spot);
                     break;
@@ -3172,6 +3216,7 @@ namespace AnimalEscape.EditorTools
                     if (room.IsTest)
                     {
                         builder.Append(" 規則=").Append((TestRule)room.TestRules.Value).Append(" 開始=").Append(room.StartPhase.Value)
+                            .Append(" 出生=").Append(room.SpawnSpace.Value)
                             .Append(room.InTestSetup.Value ? " 設定畫面開著" : " 設定畫面關著");
                     }
                 }

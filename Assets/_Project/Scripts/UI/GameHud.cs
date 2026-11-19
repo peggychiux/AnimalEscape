@@ -284,7 +284,7 @@ namespace AnimalEscape.UI
                     if (MatchState.IsExploring)
                     {
                         // 測試房間的「逛地圖」：不會開始比賽，所以沒有「開始比賽」按鈕。
-                        GUI.Label(new Rect(panel.x + 12f, panel.y + 6f, panel.width - 24f, 24f), "逛地圖（不比賽、不計時，收容區全開）", UiKit.Header);
+                        GUI.Label(new Rect(panel.x + 12f, panel.y + 6f, panel.width - 24f, 24f), "逛地圖（不比賽、不計時，所有的門都開）", UiKit.Header);
                         GUI.Label(new Rect(panel.x + 12f, panel.y + 32f, panel.width - 24f, 22f), isHost
                             ? "按 F1 可以換角色、瞬移；要比賽就在 F1 按「回到測試房間」換開始方式"
                             : "按 F1 可以換角色、瞬移；要比賽等房主回到測試房間", UiKit.Hint);
@@ -1096,7 +1096,7 @@ namespace AnimalEscape.UI
             bool hasAddress = !connection.IsOnlineRoom && isHost && !string.IsNullOrEmpty(connection.LocalAddress);
             float panelHeight = 168f + helpLines * 22f + playerCount * 22f + (hasCode ? 34f : 0f) + (choosing ? 0f : 116f) + (isAnimal ? 88f : 0f)
                 + (hasMap ? 24f : 0f) + (canChangeMap ? 36f : 0f) + (canManageBots ? 36f : 0f) + (showBotMessage ? 22f : 0f)
-                + (testRoom ? 22f : 0f) + (hasAddress ? 22f : 0f);
+                + (testRoom ? 30f : 0f) + (hasAddress ? 22f : 0f);
             var panel = new Rect(12f, 12f, 300f, panelHeight);
 
             UiKit.Panel(panel);
@@ -1108,7 +1108,11 @@ namespace AnimalEscape.UI
             GUILayout.Label((testRoom ? "測試｜" : "") + roomType + "｜" + (isHost ? "你是主機" : "你是玩家"), UiKit.Header);
             if (testRoom)
             {
-                GUILayout.Label("按 F1 打開開發者面板", UiKit.Warning);
+                // Mac 的 F1 預設是調亮度（要按 fn＋F1），所以也給一顆按鈕和 ` 鍵（2026-11-18 使用者按 F1 沒反應）。
+                if (GUILayout.Button(DevPanel.Open ? "關掉開發者面板（F1 或 ` 鍵）" : "打開開發者面板（F1 或 ` 鍵）", UiKit.Button, GUILayout.Height(26f)))
+                {
+                    DevPanel.SetOpen(!DevPanel.Open);
+                }
             }
 
             if (hasAddress)

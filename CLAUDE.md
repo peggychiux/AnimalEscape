@@ -154,6 +154,24 @@
   - **F1 開發者面板**（`DevPanel`＋`DevActions`，只有測試房間）：房主改剩餘時間（分、秒；還沒開始時改的是一局多長）、暫停（`MatchFlow.PausedLeft`）、
     混亂值、直接開門、貨車剩 10 秒、東西復原、換地圖、重新開始、回到測試房間；每個人：原地換身分（`PlayerSlot.RequestRoleInPlace`）、
     打開所有收容區／送我進實驗室／從籠子放出來／回出生點（`PlayerSlot.RequestDev`，主機做完回一句話 `DevReply`）、瞬移（擁有者自己搬：`PlayerCapture.OwnerTeleport`）。
+    2026-11-18 使用者要「丟進某個空間試玩」：「瞬移到」多一排「實驗室裡、貨車裡、研究室、收容區（輪流：兔子→猴子→浣熊）」（`DevActions.Spot`
+    的 LabInside、TruckInside、ResearchRoom、Habitat；目標點被佔住時在旁邊找空位 `DevActions.FindFreeSpot`）。門關著時進去就出不來，
+    要再瞬移一次（回覆會提醒）；只是瞬移進去，狀態還是自由（不是「在實驗室」「在貨車上」）。面板高度上限 616 → 662。
+    使用者接著在主選單找不到「選空間」：測試房間畫面右下多了「出生在哪裡」（預設／研究室／實驗室裡／貨車裡，取代原本 F1 的說明框）：
+    `TestSpawn`（RoomOptions）、`MatchState.SpawnSpace`（NetworkVariable，宣告在 InTestSetup 後面；**多了一個 NetworkVariable，舊的打包檔不能再連新版房間**）。
+    `PlayerSpawner.GetSpawnPoint(身分, 第幾位)` 先看 `TryGetTestSpawn`：空間中心（研究室＝人類出生點、實驗室門裡 3 公尺、貨車車廂中央）
+    加一排 15 個候選位置，每個身分分到第「(身分−1)＋第幾位×5」個放得下的（都用人類的大小檢查，一個一個出生也不會分到同一格）。
+    所以開始測試、換身分、F1 回出生點都會到那個空間。另外使用者說「按 F1 好像沒反應」：Mac 的 F1 預設是調亮度（要 fn＋F1），
+    所以 F1 面板也接受 ` 鍵（在面板輸入框打字時不算），遊戲裡左上角「按 F1 打開開發者面板」改成一顆按鈕。
+    **實測**（2026-11-19 下午，只有主視窗＋3 隻電腦動物，DevTestDriver；編譯 0 錯誤，整段 Console 沒有錯誤或警告）：
+    - 測試房間畫面截圖看過（「出生在哪裡」四顆按鈕和下面那行說明都在，沒有蓋到「開始測試」）。
+    - 出生＝實驗室裡＋逛地圖：人類出生在 B 的實驗室正中央 (−33.5, 21.5)，走得出門（−27.6）也走得回來；
+      出生＝貨車裡：瞬移進車廂 (−44, −6)，人類走得出去（−38）也走得回來（橫梁拿掉了）。
+    - 準備中（門關著）：出生在貨車裡走到 x=−40.9 被擋住、出生在實驗室裡走到 x=−31.0 被擋住；「瞬移到出口」可以離開車廂。
+    - 四個新瞬移都對：研究室＝人類出生點、收容區每按一次換兔子→猴子→浣熊、實驗室裡＝門裡 2 公尺、貨車裡＝車廂中央。F1 面板截圖看過（瞬移多了第二排）。
+    - 多人分格：加 3 隻電腦動物，四個人在實驗室裡各站一格（(−33.5,21.5)、(−33.5,20.4)、(−33.5,19.3)、(−34.6,21.5)），沒有疊在一起。
+    - 「回出生點」會回到那個空間；換地圖到 C 之後，四個人都在 C 的實驗室裡、位置照樣分開。
+    - **還沒測**：真的按 F1／` 鍵、真的點左上角那顆按鈕；第二個視窗（用電腦動物代替）。
   - **同一個 Wi-Fi 找房間**（`LanDiscovery`）：主機在 UDP `GameConfig.lanDiscoveryPort`（47777）回答「有房間嗎？」；找房間的人每 2 秒往 127.0.0.1、
     255.255.255.255 和每張網卡的區域廣播位址問一次。房間名稱用電腦名稱（`RoomStatus.RoomName`）。「只用這台電腦」只聽 127.0.0.1、不廣播。
   - **正式房間的比賽時間**：`MatchFlow.MatchSeconds`（主機開房時從 `RoomOptions.MatchSeconds` 寫入），不再直接讀 `GameConfig.matchSeconds`。
@@ -195,6 +213,11 @@
     （數值 5，放在最後才不會改到前面的值；畫面上排第一個）：和「準備中」一樣不比賽、不計時，但收容區全開（`ServerOpenAllHabitats`）。
     `MatchState.IsExploring`（測試房間＋Explore＋設定畫面關著）成立時：換身分不會把收容區鎖回去（`PlayerSpawner.AssignRole`）、
     換地圖後新地圖的收容區也全開（`SetMap`）、比賽條改成「逛地圖」而且沒有「開始比賽」（`GameHud.DrawMatchBar`）。測試工具 `main phase explore`。
+    同一天下午使用者又要「逛地圖也要能進去密閉空間：研究室（我理解成實驗室）與貨車內」：逛地圖時每台電腦各自打開實驗室的門
+    （`LabRoom` 在 Awake 找門板旁邊的 `Blocker` 碰撞，逛地圖時關掉、門板升起）和出口（`ExitDoor` 的 open 多看 `IsExploring`），
+    並拿掉貨車入口 1.2 公尺的橫梁和黃線（`Truck/Low Entrance`、`Truck/Entrance Stripe`），人類也能進車廂。都不用重建場景。
+    這不是真的開門：`MatchFlow.ExitOpen` 沒變，所以貨車不倒數、走進車廂也不會變成「在貨車上」（`ServerUpdateTruck` 只在 ExitOpen 時跑）。
+    （2026-11-19 實測：逛地圖時人類走得進走得出實驗室和貨車；不是逛地圖時兩邊都被擋住。詳見上面主選單那一段的實測。）
   - **實測**：編譯 0 錯誤；兩個視窗的 Console 沒有錯誤或警告。
     - 掙脫：每秒 10 下連按 20 下停在 0.499（連續按不會掉）；停手後每秒掉約 0.25，大約 2 秒歸零；從 0 每秒 10 下連按，按到第 41 下（約 4 秒）掙脫。
       測試工具的 `struggle` 按完會再等 0.4 秒才回報，所以回報的那一刻已經過了 0.3 秒的寬限、開始往回掉，看數字時要記得。
@@ -559,9 +582,10 @@ Unity 在背景也照常運作，所以整個「改程式 → 編譯 → 進 Pla
    main link lan           測試房間換連法（thiscomputer／lan／online，會關房重開）
    vp lan                  列出「附近的房間」（不在開始遊戲畫面就先切過去）；vp lan join 1 加入第 1 個；vp joinip 127.0.0.1 直接輸入 IP 加入
    main rule dup off       測試房間的規則開關（selfpick／dup／swap／noteam，on／off）；main phase exit 從哪裡開始（explore／lobby／start／escaped／chaos／exit）
+   main spawnat lab        測試房間的「出生在哪裡」（default／research／lab／truck）；report 的「出生=」看現在的設定
    main begintest          按「開始測試」；main setup 回到測試房間；main assign P2 Rabbit 房主幫別人選身分（None＝只看）
    main devpanel on        打開 F1 面板（off 關掉）；dev 指令和面板的按鈕走同一段程式：
-   main dev time 2 30      dev time 分 秒｜pause｜chaos 40｜chaos+10｜full｜openexit｜truck10｜restore｜swap Monkey｜habitats｜mylab｜release｜tp exit|lab|cage|spawn｜nextmap｜restart｜setup
+   main dev time 2 30      dev time 分 秒｜pause｜chaos 40｜chaos+10｜full｜openexit｜truck10｜restore｜swap Monkey｜habitats｜mylab｜release｜tp exit|lab|cage|spawn|labin|truck|research|habitat｜nextmap｜restart｜setup
    main setting sens 7     個人設定（sens／turn／invert／volume／fullscreen／reset；不給參數就是列出現在的值）
    main ui list            Project Settings 視窗目前那一頁的下拉選單、單選、按鈕（列 name），和 Unity Cloud 連結狀態；
    main ui pick 名稱 1      ui radio 名稱｜ui click 名稱：用程式選下拉選單第幾個、選單選、按按鈕（背景點不開下拉選單時用）
@@ -618,6 +642,11 @@ Unity 在背景也照常運作，所以整個「改程式 → 編譯 → 進 Pla
   （`Edit > Play Mode > Play`、`Assets > Refresh`、`Tools > Animal Escape > 重建原型場景`）。
 
 ### 不要在使用者正在玩的那一局裡跑測試
+
+**也不要在使用者 Play 的時候改程式檔**（2026-11-18 下午）：使用者在逛地圖時我改了 `LabRoom.cs`、`ExitDoor.cs`，Unity 在玩到一半時重新編譯並重新載入程式
+（Preferences 的 Script Changes While Playing 預設是 Recompile And Continue Playing），沒有序列化的欄位（`m_Block` 這類在 Awake 才建的）全部變成 null，
+`ExitDoor.Update`、`LabRoom.UpdateLamp`、`ConnectionManager.Update` 每一格都丟例外，記錄檔大到被重新開始。改程式前先 `main report`，
+在 Play 就先問、或等使用者停下來再寫檔。
 
 2026-11-15 發生過：我自己按了 Play 跑測試，使用者同時切進 Unity 開始玩，我的指令（`follow on`）讓他的鏡頭自己亂轉，
 他以為是遊戲壞了。之後的做法：

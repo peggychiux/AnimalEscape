@@ -18,7 +18,22 @@ namespace AnimalEscape.UI
             Exit,
             LabDoor,
             NearestCage,
-            Spawn
+            Spawn,
+
+            // 2026-11-18 使用者要的：直接丟進某個空間裡試玩（F1 面板「瞬移到」的第二排）。
+            LabInside,
+            TruckInside,
+            ResearchRoom,
+            Habitat
+        }
+
+        static readonly Role[] k_HabitatRoles = { Role.Rabbit, Role.Monkey, Role.Raccoon };
+        static int s_NextHabitat;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics()
+        {
+            s_NextHabitat = 0;
         }
 
         public static bool IsHost
@@ -228,8 +243,87 @@ namespace AnimalEscape.UI
             Vector3 position;
             Vector3 facing;
             Vector3 here = mine.transform.position;
+            string done = "瞬移了";
+            bool findFreeSpot = false;
+            MapRegistry registry = MapRegistry.Instance;
+            MapInfo map = registry != null ? registry.Active : null;
             switch (spot)
             {
+                case Spot.LabInside:
+                {
+                    LabRoom lab = LabRoom.Current;
+                    if (lab == null)
+                    {
+                        return "這張地圖找不到實驗室";
+                    }
+
+                    // 門裡面 2 公尺、面向房間裡面。逛地圖時門是開的；其他時候門關著，要出去再瞬移一次。
+                    position = lab.doorPoint - lab.doorOutward * 2f;
+                    facing = -lab.doorOutward;
+                    findFreeSpot = true;
+                    done = MatchState.IsExploring ? "瞬移到實驗室裡" : "瞬移到實驗室裡（門是關的，要出去就再瞬移一次）";
+                    break;
+                }
+
+                case Spot.TruckInside:
+                {
+                    ExitDoor door = ExitDoor.Current;
+                    if (door == null)
+                    {
+                        return "這張地圖找不到出口和貨車";
+                    }
+
+                    // 車廂正中央、面向車門（地圖那一側）。
+                    position = door.truckCenter;
+                    facing = -door.transform.forward;
+                    findFreeSpot = true;
+                    MatchFlow flow = MatchFlow.Instance;
+                    bool open = MatchState.IsExploring || (flow != null && flow.ExitOpen.Value);
+                    done = open ? "瞬移到貨車裡" : "瞬移到貨車裡（出口沒開，要出去就再瞬移一次）";
+                    break;
+                }
+
+                case Spot.ResearchRoom:
+                {
+                    Transform spawn = map != null ? map.GetSpawn(Role.Human) : null;
+                    if (spawn == null)
+                    {
+                        return "這張地圖找不到研究室";
+                    }
+
+                    position = spawn.position;
+                    facing = spawn.forward;
+                    findFreeSpot = true;
+                    done = "瞬移到研究室（人類的出生點）";
+                    break;
+                }
+
+                case Spot.Habitat:
+                {
+                    // 每按一次換下一個：兔子 → 猴子 → 浣熊（烏龜沒有收容區）。
+                    Transform spawn = null;
+                    Role role = Role.None;
+                    for (int tries = 0; tries < k_HabitatRoles.Length && spawn == null; tries++)
+                    {
+                        role = k_HabitatRoles[s_NextHabitat % k_HabitatRoles.Length];
+                        s_NextHabitat++;
+                        spawn = map != null ? map.GetSpawn(role) : null;
+                    }
+
+                    if (spawn == null)
+                    {
+                        return "這張地圖找不到收容區";
+                    }
+
+                    position = spawn.position;
+                    facing = spawn.forward;
+                    findFreeSpot = true;
+                    HabitatGate gate = HabitatGate.Find(role);
+                    done = "瞬移到" + GameConfig.Instance.GetRole(role).displayName + "的收容區"
+                        + (gate != null && !gate.IsOpen ? "（門鎖著，要出去就再瞬移一次）" : "") + "｜再按一次換下一個";
+                    break;
+                }
+
                 case Spot.Exit:
                 {
                     ExitDoor door = ExitDoor.Current;
@@ -291,8 +385,41 @@ namespace AnimalEscape.UI
             }
 
             position.y = Mathf.Max(position.y, 0.05f);
+            if (findFreeSpot)
+            {
+                position = FindFreeSpot(mine, position);
+            }
+
             Quaternion rotation = Quaternion.LookRotation(new Vector3(facing.x, 0f, facing.z).normalized, Vector3.up);
-            return mine.OwnerTeleport(position, rotation) ? "瞬移了" : "現在不能瞬移";
+            return mine.OwnerTeleport(position, rotation) ? done : "現在不能瞬移";
+        }
+
+        /// <summary>目標點被東西（或別的角色）佔住時，在旁邊一圈一圈找一個站得下自己的空位；都找不到就用原本的點。</summary>
+        static Vector3 FindFreeSpot(PlayerCapture mine, Vector3 target)
+        {
+            RoleSettings settings = mine.Avatar != null ? mine.Avatar.Settings : null;
+            float radius = settings != null ? settings.radius : 0.35f;
+            float height = settings != null ? Mathf.Max(settings.height, radius * 2f) : 1.8f;
+            if (PlayerCapture.IsSpaceFree(target, radius, height, Physics.DefaultRaycastLayers))
+            {
+                return target;
+            }
+
+            for (int ring = 1; ring <= 4; ring++)
+            {
+                float distance = ring * 0.6f;
+                for (int i = 0; i < 8; i++)
+                {
+                    float angle = i * 45f * Mathf.Deg2Rad;
+                    Vector3 point = target + new Vector3(Mathf.Sin(angle), 0f, Mathf.Cos(angle)) * distance;
+                    if (PlayerCapture.IsSpaceFree(point, radius, height, Physics.DefaultRaycastLayers))
+                    {
+                        return point;
+                    }
+                }
+            }
+
+            return target;
         }
 
         // ------------------------------------------------------------------

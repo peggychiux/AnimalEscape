@@ -53,6 +53,15 @@ namespace AnimalEscape.Core
         Explore = 5
     }
 
+    /// <summary>測試房間的「出生在哪裡」：預設是各自的出生點；選了空間，大家（含電腦玩家）都出生在那個空間裡（2026-11-18 使用者要的）。</summary>
+    public enum TestSpawn : byte
+    {
+        Default = 0,
+        ResearchRoom = 1,
+        LabInside = 2,
+        TruckInside = 3
+    }
+
     /// <summary>房間怎麼連：只用這台電腦、同一個 Wi-Fi（區域網路）、線上（Relay，給代碼）。</summary>
     public enum LinkMode : byte
     {
@@ -76,7 +85,25 @@ namespace AnimalEscape.Core
 
         public static TestStart StartPhase = TestStart.MatchStart;
 
+        public static TestSpawn SpawnSpace = TestSpawn.Default;
+
         public static LinkMode Link = LinkMode.Lan;
+
+        /// <summary>「出生在哪裡」的按鈕文字（要短，四個擠在一排）。</summary>
+        public static string SpawnSpaceName(TestSpawn space)
+        {
+            switch (space)
+            {
+                case TestSpawn.ResearchRoom:
+                    return "研究室";
+                case TestSpawn.LabInside:
+                    return "實驗室裡";
+                case TestSpawn.TruckInside:
+                    return "貨車裡";
+                default:
+                    return "預設";
+            }
+        }
 
         public static string StartPhaseName(TestStart phase)
         {
@@ -93,7 +120,7 @@ namespace AnimalEscape.Core
                 case TestStart.ExitOpen:
                     return "出口已開（貨車倒數中）";
                 case TestStart.Explore:
-                    return "逛地圖（不比賽，收容區全開）";
+                    return "逛地圖（不比賽，所有的門都開）";
                 default:
                     return phase.ToString();
             }
@@ -130,6 +157,7 @@ namespace AnimalEscape.Core
             MatchSeconds = 0f;
             Rules = TestRule.All;
             StartPhase = TestStart.MatchStart;
+            SpawnSpace = TestSpawn.Default;
             Link = LinkMode.Lan;
         }
     }

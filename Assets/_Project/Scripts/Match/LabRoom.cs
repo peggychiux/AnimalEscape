@@ -68,6 +68,7 @@ namespace AnimalEscape.Match
         static readonly Color k_ScreenOff = new Color(0.06f, 0.07f, 0.09f);
 
         Vector3 m_DoorPanelClosed;
+        Collider m_DoorBlocker;   // 門的碰撞（平常一直都在）；測試房間「逛地圖」時關掉，大家都能走進來看
         MaterialPropertyBlock m_Block;
         Camera m_ScreenCamera;
         RenderTexture m_ScreenTexture;
@@ -209,6 +210,10 @@ namespace AnimalEscape.Match
             if (doorPanel != null)
             {
                 m_DoorPanelClosed = doorPanel.localPosition;
+
+                // 門的碰撞和門板放在同一個父物件底下，名字是 Blocker（PrototypeBuilder.BuildLabRoom）。
+                Transform blocker = doorPanel.parent != null ? doorPanel.parent.Find("Blocker") : null;
+                m_DoorBlocker = blocker != null ? blocker.GetComponent<Collider>() : null;
             }
 
             m_Block = new MaterialPropertyBlock();
@@ -294,9 +299,20 @@ namespace AnimalEscape.Match
                 return;
             }
 
+            // 測試房間的「逛地圖」：門一直開著（每台電腦各自關掉門的碰撞、把門板升起來），誰都能走進來看。
+            bool exploring = MatchState.IsExploring;
+            if (m_DoorBlocker != null && m_DoorBlocker.enabled == exploring)
+            {
+                m_DoorBlocker.enabled = !exploring;
+            }
+
             // 刷開的那一刻門板升起來一下（只是外觀；門的碰撞一直都在，人類不會趁機跑進來）。
             float lift = 0f;
-            if (match != null)
+            if (exploring)
+            {
+                lift = 2.1f;
+            }
+            else if (match != null)
             {
                 float elapsed = (float)(PlayerCapture.Now - match.LabOpenedAt.Value);
                 if (elapsed >= 0f && elapsed < k_DoorOpenSeconds)
